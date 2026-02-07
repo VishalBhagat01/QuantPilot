@@ -1,0 +1,27 @@
+# Core LLM / LangChain stack
+langchain-core
+langchain
+langchain-community
+langchain-google-genai
+langchain-huggingface
+
+# LangGraph
+langgraph
+langgraph-checkpoint-postgres
+
+# Vector DB / Embeddings (Internal use)
+faiss-cpu
+sentence-transformers
+
+# Database
+psycopg[binary,pool]
+
+# Backend / API
+fastapi
+uvicorn
+pydantic
+
+# Utilities
+python-dotenv
+duckduckgo-search
+requests
