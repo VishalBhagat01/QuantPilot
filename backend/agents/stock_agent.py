@@ -27,6 +27,7 @@ from backend.ingestion.tool import (
     earning_estimate,
     future_expected_earning,
     get_gold_silver_price,
+    get_stock_intraday_chart,
 )
 import json
 import os
@@ -55,22 +56,17 @@ llm = ChatGroq(
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     next_step: str
-    loop_count: int 
+    feedback: str # Reviewer feedback for the analyst
 
 # -------------------
 # Tool Map
 # -------------------
 
 tool_map = {
-    # -------- FINNHUB --------
     "get_stock_price": get_stock_price,
     "get_stock_news": get_stock_news,
     "get_old_news": get_old_news,
-
-    # -------- SEARCH --------
     "search_tool": search_tool,
-
-    # -------- ALPHAVANTAGE --------
     "get_stock_price2": get_stock_price2,
     "get_stock_news2": get_stock_news2,
     "company_inside_news": company_inside_news,
@@ -80,6 +76,7 @@ tool_map = {
     "earning_estimate": earning_estimate,
     "future_expected_earning": future_expected_earning,
     "get_gold_silver_price": get_gold_silver_price,
+    "get_stock_intraday_chart": get_stock_intraday_chart,
 }
 
 
@@ -87,130 +84,135 @@ tool_map = {
 # Nodes
 # -------------------
 
-def llm_node(state: AgentState):
+def analyst_node(state: AgentState):
     """
-    Decides whether to use a tool or respond directly.
+    LLM1 (Groq): Analyzes requirements and proposes tool calls or answers.
+    Considers feedback from the Reviewer.
     """
-    loop_count = state.get("loop_count", 0)
-    print(f"\n>>> [AGENT] Step {loop_count + 1} | Thinking...", flush=True)
+    print(f"\n>>> [ANALYST] Thinking...", flush=True)
     
-    if loop_count >= 5:
-        print("!!! [AGENT] Max steps reached. Breaking loop.", flush=True)
-        return {
-            "messages": [AIMessage(content="I've analyzed the data but am having trouble getting a final answer within my step limit. Please try a simpler query.")],
-            "next_step": END,
-            "loop_count": loop_count 
-        }
+    feedback = state.get("feedback", "")
+    feedback_section = f"\n\nCRITICAL FEEDBACK FROM REVIEWER:\n{feedback}" if feedback else ""
 
     prompt = ChatPromptTemplate.from_messages([
     ("system",
-     "You are an expert stock analysis chatbot.\n\n"
+    "You are the Lead Analyst in a multi-agent stock research system.\n"
+    "You NEVER guess market data. You ALWAYS use tools when data is required.\n"
+    "You are a decision router + analyst.\n\n"
 
-     "You can call external tools to fetch live market data, fundamentals, news, earnings, and macro signals.\n\n"
+    "====================\n"
+    "AVAILABLE TOOLS\n"
+    "====================\n"
+    "Price & Market Data:\n"
+    "- get_stock_price → real-time quote\n"
+    "- get_stock_price2 → latest daily OHLCV\n"
+    "- get_stock_intraday_chart → intraday chart series\n"
+    "- top_gainers → market movers\n\n"
 
-     "Available tools and when to use them:\n"
-     "- get_stock_price → live stock quote and price metrics\n"
-     "- get_stock_news → latest company news\n"
-     "- get_old_news → historical company news\n"
-     "- search_tool → web search when APIs cannot answer\n"
-     "- get_stock_price2 → historical daily price series\n"
-     "- get_stock_news2 → news sentiment data\n"
-     "- company_inside_news → earnings call transcript\n"
-     "- top_gainers → today’s top gaining and losing stocks\n"
-     "- company_overview → company fundamentals and valuation\n"
-     "- annual_income_statement → revenue and profit data\n"
-     "- earning_estimate → analyst EPS estimates\n"
-     "- future_expected_earning → upcoming earnings dates\n"
-     "- get_gold_silver_price → gold and silver spot prices\n\n"
+    "News & Sentiment:\n"
+    "- get_stock_news → recent company news\n"
+    "- get_old_news → historical news\n"
+    "- get_stock_news2 → sentiment scored news\n"
+    "- search_tool → general web search\n\n"
 
-     "If tool data is required, respond with ONLY valid JSON using this format:\n\n"
+    "Fundamentals & Financials:\n"
+    "- company_overview → fundamentals + valuation\n"
+    "- annual_income_statement → financial reports\n"
+    "- earning_estimate → analyst projections\n"
+    "- future_expected_earning → earnings calendar\n"
+    "- company_inside_news → earnings transcripts\n\n"
 
-     "{{\"action\":\"tool\",\"tool\":\"tool_name\",\"args\":{{\"symbol\":\"TICKER\"}}}}\n\n"
+    "Macro:\n"
+    "- get_gold_silver_price → commodity prices\n\n"
 
-     "If the tool takes no arguments, use:\n"
+    "====================\n"
+    "MANDATORY TOOL RULES\n"
+    "====================\n"
+    "1. If the user asks about ANY stock/company data → you MUST call a tool.\n"
+    "2. If price is requested → call get_stock_price.\n"
+    "3. If chart/price movement is requested → call get_stock_intraday_chart.\n"
+    "4. If fundamentals/valuation is requested → call company_overview.\n"
+    "5. If news/sentiment is requested → call a news tool.\n"
+    "6. If unknown info is requested → call search_tool and analyze the output from the tools than return it to the user after formatting it.\n"
+    "7. NEVER answer with internal knowledge when a tool exists but you must format the given tool data as the user aksed.\n"
+    "8  if required call as many tool as need per message.\n"
+    "9. NEVER explain tool calls.\n"
+    "10. Tool calls MUST be valid JSON ONLY.\n\n"
 
-     "{{\"action\":\"tool\",\"tool\":\"top_gainers\",\"args\":{{}}}}\n\n"
+    "====================\n"
+    "TOOL CALL FORMAT\n"
+    "====================\n"
+    "{\"action\":\"tool\",\"tool\":\"TOOL_NAME\",\"args\":{\"symbol\":\"TICKER\"}}\n\n"
 
-     "Argument rules:\n"
-     "- Include symbol when required\n\n"
+    "No markdown. No commentary. No extra keys.\n\n"
 
-     "Example with symbol:\n"
-     "{{\"action\":\"tool\",\"tool\":\"get_stock_price\",\"args\":{{\"symbol\":\"AAPL\"}}}}\n\n"
+    "====================\n"
+    "DIRECT RESPONSE RULES\n"
+    "====================\n"
+    "If sufficient tool data has already been provided in prior messages:\n"
+    "- Respond in plain text analysis\n"
+    "- When discussing a stock → append on new line: DASHBOARD:TICKER\n\n"
 
-     "Example without symbol:\n"
-     "{{\"action\":\"tool\",\"tool\":\"top_gainers\",\"args\":{{}}}}\n\n"
-
-     "Output rules:\n"
-     "- JSON only when calling tools\n"
-     "- No markdown\n"
-     "- No explanation text\n"
-     "- One tool call per message\n"
-     "- Use double quotes only\n"
-     "- Never include extra fields\n\n"
-
-     "If you can answer directly without tools, respond in plain text.\n"
-     "Never mix JSON and text."
+    f"{feedback_section}"
     ),
     ("placeholder", "{messages}")
 ])
 
+
     chain = prompt | llm
-    
     try:
         response = chain.invoke({"messages": state["messages"]})
-        print(f">>> [AGENT] AI responds. Parsing...", flush=True)
-        return {
-            "messages": [response],
-            "next_step": "parse",
-            "loop_count": loop_count + 1 
-        }
+        return {"messages": [response], "feedback": ""} # Clear feedback once processed
     except Exception as e:
-        print(f"!!! [AGENT] LLM Error: {e}", flush=True)
-        return {
-            "messages": [AIMessage(content=f"Sorry, I encountered an error: {str(e)}")],
-            "next_step": END,
-            "loop_count": loop_count + 1
-        }
+        return {"messages": [AIMessage(content=f"Analyst encountered error: {str(e)}")]}
 
-def parse_node(state: AgentState):
+def reviewer_node(state: AgentState):
     """
-    Checks if the AI output is a tool call or a final answer.
+    LLM2 (Gemini): Validates Analyst output and tool results.
+    Decides if the task is done or needs more work.
     """
-    last_message = state["messages"][-1]
-    content = last_message.content.strip()
-    loop_count = state.get("loop_count", 0)
+    print(f">>> [REVIEWER] Verifying...", flush=True)
     
-    try:
-
-        start_idx = content.find('{')
-        end_idx = content.rfind('}')
+    last_message = state["messages"][-1]
+    
+    # Reviewer's prompt to evaluate the state
+    review_prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         "You are the Senior Reviewer. Your goal is to ensure the Analyst correctly answers the user's question with high accuracy.\n\n"
+         "Evaluate the last message/state:\n"
+         "1. If it's a JSON tool call: Is it valid JSON? Does it use the correct symbol? (Mark as 'VALID_TOOL' or 'INVALID_TOOL')\n"
+         "2. If it's a Tool result: Did it fail? Does it need more context? (Mark as 'CONTINUE' or 'RETRY')\n"
+         "3. If it's a draft response: Is it complete? Does it include 'DASHBOARD:TICKER'? (Mark as 'FINAL' or 'FEEDBACK')\n\n"
+         "Respond with a decision and any feedback for the Analyst if needed."
+        ),
+        ("placeholder", "{messages}")
+    ])
+    
+    # We use llm2 for reasoning here
+    eval_chain = review_prompt | llm2
+    eval_res = eval_chain.invoke({"messages": state["messages"]})
+    eval_content = eval_res.content.upper()
+    
+    # Determine next step
+    if "VALID_TOOL" in eval_content:
+        return {"next_step": "tools"}
+    elif "INVALID_TOOL" in eval_content or "FEEDBACK" in eval_content or "RETRY" in eval_content:
+        return {"next_step": "analyst", "feedback": eval_res.content}
+    elif "FINAL" in eval_content or "DASHBOARD:" in last_message.content:
+        return {"next_step": END}
+    elif "CONTINUE" in eval_content:
+        return {"next_step": "analyst"}
+    
+    # Fallback: If it looks like a tool call but not explicit, try tools
+    if "{" in last_message.content and "action" in last_message.content:
+        return {"next_step": "tools"}
         
-        if start_idx != -1 and end_idx != -1:
-            json_str = content[start_idx:end_idx+1]
-            parsed = json.loads(json_str)
-            
-            if parsed.get("action") == "tool":
-                print(f">>> [AGENT] Action: Tool -> {parsed.get('tool')}", flush=True)
-                return {"next_step": "tools", "loop_count": loop_count}
-        
-        print(">>> [AGENT] Action: Direct Response. Ending.", flush=True)
-        return {"next_step": END, "loop_count": loop_count}
-    except Exception as e:
-        print(f"!!! [AGENT] JSON Fix required: {e}", flush=True)
-        error_msg = f"Your last response was not valid JSON: {str(e)}. Please retry with the correct JSON format if you need a tool."
-        return {
-            "messages": [HumanMessage(content=f"SYSTEM NOTICE: {error_msg}")],
-            "next_step": "llm",
-            "loop_count": loop_count
-        }
+    return {"next_step": END}
 
 def tool_node(state: AgentState):
-    """
-    Executes the requested tool and feeds back the result.
-    """
-    ai_message = next(msg for msg in reversed(state["messages"]) if isinstance(msg, AIMessage))
-    content = ai_message.content.strip()
-    loop_count = state.get("loop_count", 0)
+    """Executes tools requested by Analyst."""
+    last_message = state["messages"][-1]
+    content = last_message.content.strip()
     
     try:
         start_idx = content.find('{')
@@ -220,38 +222,22 @@ def tool_node(state: AgentState):
         tool_name = parsed["tool"]
         tool_args = parsed.get("args", {})
         
-        print(f">>> [AGENT] Executing {tool_name} with {tool_args}", flush=True)
+        print(f">>> [TOOLS] Executing {tool_name}...", flush=True)
         
         if tool_name not in tool_map:
-            raise ValueError(f"Unknown tool: {tool_name}")
+            return {"messages": [HumanMessage(content=f"SYSTEM ERROR: Tool '{tool_name}' unknown.")]}
             
-        tool = tool_map[tool_name]
-        result = tool.invoke(tool_args)
-        
-        result_str = str(result)[:1000] 
-        print(f">>> [AGENT] Tool success. Informing AI...", flush=True)
-        
-        return {
-            "messages": [HumanMessage(content=f"Observation from {tool_name}: {result_str}")],
-            "next_step": "llm",
-            "loop_count": loop_count
-        }
+        result = tool_map[tool_name].invoke(tool_args)
+        return {"messages": [HumanMessage(content=f"Observation from {tool_name}: {str(result)[:2000]}")], "next_step": "analyst"}
     except Exception as e:
-        print(f"!!! [AGENT] Tool Error: {e}", flush=True)
-        return {
-            "messages": [HumanMessage(content=f"SYSTEM ERROR: The tool failed: {str(e)}. Please adjust your request or try another tool.")],
-            "next_step": "llm",
-            "loop_count": loop_count
-        }
-
-
+        return {"messages": [HumanMessage(content=f"SYSTEM ERROR: JSON/Tool failure: {str(e)}")], "next_step": "analyst"}
 
 # -------------------
 # Router logic
 # -------------------
 
 def route_next(state: AgentState):
-    return state["next_step"]
+    return state.get("next_step", END)
 
 # -------------------
 # Graph Construction
@@ -259,19 +245,21 @@ def route_next(state: AgentState):
 
 builder = StateGraph(AgentState)
 
-builder.add_node("llm", llm_node)
-builder.add_node("parse", parse_node)
+builder.add_node("analyst", analyst_node)
+builder.add_node("reviewer", reviewer_node)
 builder.add_node("tools", tool_node)
 
-builder.set_entry_point("llm")
+builder.set_entry_point("analyst")
 
-builder.add_edge("llm", "parse")
-builder.add_conditional_edges("parse", route_next, {
+builder.add_edge("analyst", "reviewer")
+
+builder.add_conditional_edges("reviewer", route_next, {
     "tools": "tools",
-    "llm": "llm",
+    "analyst": "analyst",
     END: END
 })
-builder.add_edge("tools", "llm")
+
+builder.add_edge("tools", "analyst")
 
 #-----------------------------
 #  DataBase

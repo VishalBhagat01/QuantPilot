@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from langchain_core.messages import HumanMessage, AIMessage
 from backend.agents.stock_agent import graph, saver
 from backend.db.db import get_db, release_db, init_db
@@ -169,3 +169,15 @@ def analyze_stock(req: StockRequest):
             "response": f"I'm sorry, an error occurred: {str(e)}",
             "thread_id": thread_id
         }
+@app.post("/agent/stock")
+def get_dashboard_data(req: Dict[str, str]):
+    symbol = req.get("symbol")
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+    
+    try:
+        from backend.ingestion.tool import fetch_stock_dashboard_data
+        return fetch_stock_dashboard_data(symbol)
+    except Exception as e:
+        print(f"[ERROR] Dashboard fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

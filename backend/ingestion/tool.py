@@ -339,3 +339,68 @@ def get_gold_silver_price():
     return requests.get(
         f"https://www.alphavantage.co/query?function=GOLD_SILVER_SPOT&apikey={ALPHA_KEY}"
     ).json()
+@tool
+def get_stock_intraday_chart(symbol: str):
+    """
+    Retrieve intraday price series (5-minute interval) for charting.
+
+    Use this tool when the agent needs granular price history for
+    the current trading session.
+
+    Args:
+        symbol: Stock ticker
+    """
+    url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&outputsize=small&apikey={ALPHA_KEY}"
+    data = requests.get(url).json()
+    
+    time_series = data.get("Time Series (5min)", {})
+    chart_data = []
+    
+    # Get last 50 data points and reverse to chronological order
+    for timestamp in sorted(time_series.keys())[-50:]:
+        chart_data.append({
+            "time": timestamp.split(" ")[1][:5], # HH:MM
+            "price": float(time_series[timestamp]["1. open"])
+        })
+    
+    return chart_data
+
+
+def fetch_stock_dashboard_data(symbol: str):
+    """
+    Directly fetches aggregated data for the dashboard widget.
+    Bypasses LLM for performance and quota management.
+    """
+    print(f">>> [DASHBOARD] Consolidating data for {symbol}...", flush=True)
+    
+    # We use .invoke manually here for direct execution
+    try:
+        quote = get_stock_price.invoke({"symbol": symbol})
+    except:
+        quote = {}
+        
+    try:
+        chart = get_stock_intraday_chart.invoke({"symbol": symbol})
+    except:
+        chart = []
+        
+    try:
+        overview = company_overview.invoke({"symbol": symbol})
+    except:
+        overview = {}
+
+    return {
+        "symbol": symbol,
+        "company": overview.get("name", symbol),
+        "price": quote.get("current"),
+        "change": quote.get("current") - quote.get("prev_close") if quote.get("current") and quote.get("prev_close") else 0,
+        "percent": ((quote.get("current") - quote.get("prev_close")) / quote.get("prev_close") * 100) if quote.get("current") and quote.get("prev_close") else 0,
+        "after_hours": None,
+        "open": quote.get("open"),
+        "high": quote.get("high"),
+        "low": quote.get("low"),
+        "prev_close": quote.get("prev_close"),
+        "volume": overview.get("market_cap"), 
+        "market_cap": overview.get("market_cap"),
+        "chart": chart
+    }

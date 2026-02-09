@@ -3,6 +3,7 @@ import axios from "axios"
 import ReactMarkdown from 'react-markdown'
 import { Send, Bot, User, Menu, PlusCircle } from 'lucide-react'
 import Sidebar from "./components/Sidebar"
+import StockCard from "./components/StockCard"
 import "./App.css"
 
 const API_BASE = "http://localhost:8000"
@@ -158,6 +159,11 @@ export default function App() {
               </div>
               <div className="bubble">
                 <ReactMarkdown>{msg.content}</ReactMarkdown>
+                {msg.content.includes("DASHBOARD:") && (
+                  <div className="mt-4">
+                    <StockCard symbol={msg.content.split("DASHBOARD:")[1].trim().split(" ")[0]} />
+                  </div>
+                )}
               </div>
             </div>
           ))}
