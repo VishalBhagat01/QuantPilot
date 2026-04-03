@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from "react"
 import axios from "axios"
 import ReactMarkdown from 'react-markdown'
-import { Send, Bot, User, Menu, PlusCircle } from 'lucide-react'
+import { Send, Bot, User, Menu, PlusCircle, Loader2, Wrench, CheckCircle2, ChevronDown, ChevronUp, MessageSquare, BarChart2 } from 'lucide-react'
 import Sidebar from "./components/Sidebar"
 import StockCard from "./components/StockCard"
+// NEW: Import the TradingPanel for pattern detection & broker features
+import TradingPanel from "./components/TradingPanel"
 import "./App.css"
 
 const API_BASE = "http://localhost:8000"
@@ -16,8 +18,9 @@ export default function App() {
   const [threads, setThreads] = useState([])
   const [activeThreadId, setActiveThreadId] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [loadingText, setLoadingText] = useState("Analyzing...")
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // NEW: Track which view is active — 'chat' (default) or 'trading'
+  const [activeView, setActiveView] = useState('chat')
   const chatEndRef = useRef(null)
 
   const scrollToBottom = () => {
@@ -76,51 +79,36 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
-    let interval
-    if (loading && !activeThreadId) {
-      const texts = [
-        "Thinking...",
-        "Fetching stock data...",
-        "Analyzing market news...",
-        "Computing insights...",
-        "Formatting response..."
-      ]
-      let i = 0
-      interval = setInterval(() => {
-        setLoadingText(texts[i % texts.length])
-        i++
-      }, 3000)
-    } else {
-      setLoadingText("Analyzing...")
-    }
-    return () => clearInterval(interval)
-  }, [loading, activeThreadId])
-
   const sendMessage = async () => {
     if (!input.trim()) return
 
     const userMessage = { role: "user", content: input }
     setMessages(prev => [...prev, userMessage])
+    const query = input
     setInput("")
     setLoading(true)
 
     try {
       const res = await axios.post(`${API_BASE}/analyze`, {
-        query: input,
+        query: query,
         thread_id: activeThreadId
       })
 
       const aiMessage = { role: "assistant", content: res.data.response }
       setMessages(prev => [...prev, aiMessage])
 
-      if (!activeThreadId) {
+      if (res.data.thread_id && !activeThreadId) {
         setActiveThreadId(res.data.thread_id)
         fetchThreads()
       }
     } catch (err) {
-      setMessages(prev => [...prev, { role: "assistant", content: "Error: Could not reach the AI. Please ensure the backend server is running." }])
+      console.error("Analysis failed:", err)
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "Error: Could not reach the AI. Please ensure the backend server is running."
+      }])
     }
+
     setLoading(false)
   }
 
@@ -141,60 +129,101 @@ export default function App() {
       <main className="chat-main">
         <header className="mobile-header">
           <button className="menu-btn" onClick={() => setSidebarOpen(true)}>
-            <Menu size={24} />
+            <Menu size={20} />
           </button>
-          <span className="current-thread-title">
-            {threads.find(t => t.id === activeThreadId)?.title || "New Chat"}
-          </span>
-          <button className="mobile-new-chat-btn" onClick={handleNewChat}>
-            <PlusCircle size={24} />
+          
+          <div className="flex items-center gap-3 ml-2 lg:ml-0">
+             <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center border border-indigo-500/30">
+                <Bot size={18} className="text-indigo-400" />
+             </div>
+             <span className="font-bold text-white tracking-tight">QuantPilot AI</span>
+          </div>
+
+          {/* ── NEW: View toggle buttons (Chat vs Trading) ── */}
+          <div className="flex bg-slate-900/50 backdrop-blur-md rounded-xl p-1 border border-white/5 ml-auto mr-4">
+            <button
+              onClick={() => setActiveView('chat')}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-300 flex items-center gap-2 ${
+                activeView === 'chat' 
+                  ? 'bg-indigo-500 text-white shadow-lg' 
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <MessageSquare size={14} />
+              CHAT
+            </button>
+            <button
+              onClick={() => setActiveView('trading')}
+              className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-300 flex items-center gap-2 ${
+                activeView === 'trading' 
+                  ? 'bg-indigo-500 text-white shadow-lg' 
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <BarChart2 size={14} />
+              TERMINAL
+            </button>
+          </div>
+
+          <button className="p-2 hover:bg-white/5 rounded-lg transition-colors lg:hidden" onClick={handleNewChat}>
+            <PlusCircle size={20} className="text-slate-400" />
           </button>
         </header>
 
-        <div className="chat-history">
-          {messages.map((msg, idx) => (
-            <div key={idx} className={`message ${msg.role}`}>
-              <div className="icon">
-                {msg.role === 'user' ? <User size={20} color="white" /> : <Bot size={20} color="white" />}
-              </div>
-              <div className="bubble">
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
-                {msg.content.includes("DASHBOARD:") && (
-                  <div className="mt-4">
-                    <StockCard symbol={msg.content.split("DASHBOARD:")[1].trim().split(" ")[0]} />
+        <div className="flex-1 relative overflow-hidden">
+          {activeView === 'trading' ? (
+            <div className="trading-view-container h-full">
+              <TradingPanel />
+            </div>
+          ) : (
+            <div className="h-full flex flex-col">
+              <div className="chat-history">
+                {messages.map((msg, idx) => (
+                  <div key={idx} className={`message ${msg.role} animate-fade-in`}>
+                    <div className="icon">
+                      {msg.role === 'user' ? <User size={20} /> : <Bot size={20} />}
+                    </div>
+                    <div className="bubble">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      {msg.content.includes("DASHBOARD:") && (
+                        <div className="mt-8">
+                          <StockCard symbol={msg.content.split("DASHBOARD:")[1].trim().split(" ")[0].split("\n")[0]} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {loading && (
+                  <div className="message assistant animate-fade-in">
+                    <div className="icon"><Bot size={20} /></div>
+                    <div className="bubble loading">
+                      <div className="flex items-center gap-3 bg-slate-900/50 rounded-2xl px-6 py-4 border border-white/5">
+                        <Loader2 size={18} className="animate-spin text-indigo-400" />
+                        <span className="text-sm font-medium text-slate-400">Analyzing market data...</span>
+                      </div>
+                    </div>
                   </div>
                 )}
+
+                <div ref={chatEndRef} />
               </div>
-            </div>
-          ))}
-          {loading && !messages.find(m => m.role === 'assistant' && (m.content === loadingText || m.content?.includes("Thinking"))) && (
-            <div className="message assistant">
-              <div className="icon"><Bot size={20} color="white" /></div>
-              <div className="bubble loading">
-                <span className="text">{loadingText}</span>
-                <div className="dots">
-                  <span className="dot"></span>
-                  <span className="dot"></span>
-                  <span className="dot"></span>
+
+              <div className="input-container">
+                <div className="input-box">
+                  <input
+                    placeholder="Ask me anything about stocks..."
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    onKeyPress={e => e.key === "Enter" && sendMessage()}
+                  />
+                  <button className="send-btn" onClick={sendMessage} disabled={loading || !input.trim()}>
+                    {loading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                  </button>
                 </div>
               </div>
             </div>
           )}
-          <div ref={chatEndRef} />
-        </div>
-
-        <div className="input-container">
-          <div className="input-box">
-            <input
-              placeholder="Ask me anything about stocks..."
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyPress={e => e.key === "Enter" && sendMessage()}
-            />
-            <button className="send-btn" onClick={sendMessage} disabled={loading}>
-              <Send size={20} />
-            </button>
-          </div>
         </div>
       </main>
     </div>

@@ -1,5 +1,6 @@
 import os
 import requests
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_community.tools import DuckDuckGoSearchRun
@@ -66,8 +67,10 @@ def get_stock_news(symbol: str):
         - url
         - publish time
     """
+    today = datetime.now().strftime("%Y-%m-%d")
+    one_month_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
     data = requests.get(
-        f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from=2025-01-01&to=2026-12-31&token={FINNHUB_KEY}"
+        f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={one_month_ago}&to={today}&token={FINNHUB_KEY}"
     ).json()
 
     return [
@@ -96,8 +99,10 @@ def get_old_news(symbol: str):
     Returns:
         List of 5 historical news records from Finnhub.
     """
+    today = datetime.now().strftime("%Y-%m-%d")
+    four_years_ago = (datetime.now() - timedelta(days=4*365)).strftime("%Y-%m-%d")
     data = requests.get(
-        f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from=2020-01-01&to=2024-12-31&token={FINNHUB_KEY}"
+        f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={four_years_ago}&to={today}&token={FINNHUB_KEY}"
     ).json()
 
     return data[:5]
@@ -400,7 +405,204 @@ def fetch_stock_dashboard_data(symbol: str):
         "high": quote.get("high"),
         "low": quote.get("low"),
         "prev_close": quote.get("prev_close"),
-        "volume": overview.get("market_cap"), 
+        "volume": quote.get("volume"), 
         "market_cap": overview.get("market_cap"),
         "chart": chart
     }
+
+
+# =============================================================================
+# NEW: CHART PATTERN DETECTION TOOLS
+# =============================================================================
+# These tools integrate the foduucom/stockmarket-pattern-detection-yolov8 model
+# from HuggingFace. The model detects chart patterns (Head & Shoulders, 
+# Double Top/Bottom, Triangle, etc.) and generates BUY/SELL/HOLD signals.
+# =============================================================================
+
+@tool
+def detect_chart_patterns(symbol: str):
+    """
+    Run YOLOv8 AI pattern detection on a stock's candlestick chart.
+
+    This tool generates a candlestick chart image from the stock's recent
+    price history, then runs the foduucom/stockmarket-pattern-detection-yolov8
+    model to detect technical chart patterns. It returns detected patterns
+    along with a BUY/SELL/HOLD trading signal.
+
+    Use this tool when:
+    - The user asks about chart patterns for a stock
+    - The user wants a technical analysis based on visual patterns
+    - The user asks whether to buy, sell, or hold a stock
+    - The user wants pattern-based trading signals
+
+    Detectable patterns: Head & Shoulders (top/bottom), Double Top (M_Head),
+    Double Bottom (W_Bottom), Triangle, StockLine (trend line).
+
+    Args:
+        symbol: Stock ticker symbol (e.g., AAPL, MSFT, TSLA)
+
+    Returns:
+        Dictionary containing:
+        - symbol: The analyzed ticker
+        - patterns: List of detected patterns with confidence scores
+        - signal: Trading signal (BUY, SELL, or HOLD)
+        - signal_confidence: Confidence in the signal (0-100%)
+        - reasoning: Explanation of why this signal was generated
+    """
+    from backend.pattern_detection.pattern_detector import analyze_chart
+    from backend.trading.signal_engine import generate_signal
+
+    # Step 1: Run the YOLOv8 pattern detection pipeline
+    analysis = analyze_chart(symbol, period="3mo")
+
+    if analysis.error:
+        return {
+            "symbol": symbol,
+            "error": analysis.error,
+            "patterns": [],
+            "signal": "HOLD",
+            "signal_confidence": 0,
+            "reasoning": f"Pattern detection failed: {analysis.error}",
+        }
+
+    # Step 2: Convert detected patterns to a trading signal
+    signal = generate_signal(analysis.patterns)
+
+    return {
+        "symbol": analysis.symbol,
+        "patterns": [
+            {
+                "name": p.name,
+                "confidence": f"{p.confidence:.1%}",
+                "confidence_raw": p.confidence,
+            }
+            for p in analysis.patterns
+        ],
+        "signal": signal.signal,
+        "signal_confidence": f"{signal.confidence:.1%}",
+        "score": signal.score,
+        "reasoning": signal.reasoning,
+        "individual_signals": signal.individual_signals,
+        "chart_image": analysis.chart_image_path,
+        "timestamp": analysis.analysis_timestamp,
+    }
+
+
+# =============================================================================
+# NEW: BROKER / TRADING TOOLS (Alpaca Markets API)
+# =============================================================================
+# These tools connect to the Alpaca Markets brokerage API to execute real
+# trades. By default, they use PAPER TRADING (sandbox) so no real money
+# is at risk. Configure via ALPACA_API_KEY and ALPACA_SECRET_KEY in .env.
+# =============================================================================
+
+@tool
+def get_broker_account():
+    """
+    Get the current Alpaca trading account information.
+
+    Use this tool when:
+    - The user asks about their trading account balance
+    - The user wants to know their buying power or cash available
+    - Before placing a trade, to check if there's enough buying power
+
+    Returns:
+        Dictionary containing:
+        - cash: Available cash in the account
+        - buying_power: Total buying power (cash + margin)
+        - equity: Total account equity
+        - portfolio_value: Current portfolio market value
+        - status: Account status (ACTIVE, etc.)
+        - paper: Whether this is paper trading (true/false)
+    """
+    from backend.trading.broker import get_account_info
+    return get_account_info()
+
+
+@tool
+def get_broker_positions():
+    """
+    Get all current open positions from the Alpaca broker.
+
+    Use this tool when:
+    - The user asks what stocks they currently hold
+    - The user wants to see their portfolio
+    - Before suggesting a trade, to check existing positions
+    - The user asks about unrealized profit/loss
+
+    Returns:
+        List of position dictionaries, each containing:
+        - symbol: Stock ticker
+        - qty: Number of shares held
+        - market_value: Current market value
+        - avg_entry_price: Average price paid per share
+        - current_price: Current market price
+        - unrealized_pl: Unrealized profit/loss in dollars
+        - unrealized_pl_pct: Unrealized P&L as a percentage
+    """
+    from backend.trading.broker import get_positions
+    return get_positions()
+
+
+@tool
+def place_trade(symbol: str, qty: int, side: str, order_type: str = "market"):
+    """
+    Place a trade order via the Alpaca broker.
+
+    IMPORTANT: This executes a real trade (or paper trade if in sandbox mode).
+    Always confirm the signal and reasoning with the user before calling this.
+
+    Use this tool when:
+    - The user explicitly asks to buy or sell a stock
+    - The agent has analyzed patterns and the user confirms a trade
+    - The user says "execute the trade" or "place the order"
+
+    Safety limits enforced:
+    - Maximum 100 shares per order
+    - Maximum $10,000 per order
+    - Paper trading by default
+
+    Args:
+        symbol: Stock ticker symbol (e.g., AAPL, MSFT)
+        qty: Number of shares to buy or sell (max 100)
+        side: "buy" or "sell"
+        order_type: "market" (default) or "limit"
+
+    Returns:
+        Dictionary with order confirmation:
+        - order_id: Unique order ID
+        - status: Order status (new, filled, etc.)
+        - symbol: Stock ticker
+        - qty: Shares ordered
+        - side: buy or sell
+    """
+    from backend.trading.broker import place_order
+    return place_order(
+        symbol=symbol,
+        qty=qty,
+        side=side,
+        order_type=order_type,
+    )
+
+
+@tool
+def close_trade(symbol: str):
+    """
+    Close an entire open position for a given stock symbol.
+
+    This sells all shares of a long position (or covers a short position)
+    at market price. Use this when the user wants to exit a position completely.
+
+    Use this tool when:
+    - The user says "close my position in AAPL"
+    - The user says "sell all my shares of MSFT"
+    - The agent detects a strong reversal pattern on a held position
+
+    Args:
+        symbol: Stock ticker to close the position for
+
+    Returns:
+        Dictionary with close order confirmation or error message.
+    """
+    from backend.trading.broker import close_position
+    return close_position(symbol)

@@ -25,3 +25,23 @@ pydantic
 python-dotenv
 duckduckgo-search
 requests
+
+# =============================================================================
+# NEW: YOLOv8 Chart Pattern Detection
+# =============================================================================
+# These packages power the foduucom/stockmarket-pattern-detection-yolov8 model
+# for detecting chart patterns (Head & Shoulders, Double Top/Bottom, etc.)
+# =============================================================================
+ultralytics           # YOLOv8 model framework (loads model from HuggingFace)
+opencv-python         # Image processing for chart analysis
+mplfinance            # Generates candlestick chart images from OHLCV data
+Pillow                # Image handling utilities
+yfinance              # Fetches OHLCV price data from Yahoo Finance
+
+# =============================================================================
+# NEW: Alpaca Broker Integration
+# =============================================================================
+# Connects to Alpaca Markets API for trade execution (buy/sell stocks)
+# Default: paper trading (sandbox, no real money at risk)
+# =============================================================================
+alpaca-py             # Official Alpaca Markets Python SDK
