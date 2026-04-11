@@ -122,13 +122,19 @@ def _get_model():
         
         try:
             from ultralytics import YOLO
+            from huggingface_hub import hf_hub_download
             
             # ---------------------------------------------------------------
-            # Load model directly from HuggingFace Hub
-            # The model ID "foduucom/stockmarket-pattern-detection-yolov8"
-            # auto-downloads the model weights on first use.
+            # Download the best.pt weights from HuggingFace Hub.
+            # hf_hub_download caches the file locally (~25MB) so subsequent
+            # calls are instant. Then we load it with the YOLO constructor.
             # ---------------------------------------------------------------
-            _model = YOLO('foduucom/stockmarket-pattern-detection-yolov8')
+            model_path = hf_hub_download(
+                repo_id="foduucom/stockmarket-pattern-detection-yolov8",
+                filename="best.pt"
+            )
+            logger.info(f"[PATTERN] Model weights downloaded to: {model_path}")
+            _model = YOLO(model_path)
             
             # ---------------------------------------------------------------
             # Configure inference parameters:

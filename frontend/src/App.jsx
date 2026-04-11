@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect } from "react"
 import axios from "axios"
 import ReactMarkdown from 'react-markdown'
-import { Send, Bot, User, Menu, PlusCircle, Loader2, Wrench, CheckCircle2, ChevronDown, ChevronUp, MessageSquare, BarChart2 } from 'lucide-react'
+import { Send, Bot, User, Menu, PlusCircle, Loader2, MessageSquare, BarChart2, TrendingUp, Zap, Search, DollarSign } from 'lucide-react'
 import Sidebar from "./components/Sidebar"
 import StockCard from "./components/StockCard"
-// NEW: Import the TradingPanel for pattern detection & broker features
 import TradingPanel from "./components/TradingPanel"
 import "./App.css"
 
@@ -19,7 +18,6 @@ export default function App() {
   const [activeThreadId, setActiveThreadId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  // NEW: Track which view is active — 'chat' (default) or 'trading'
   const [activeView, setActiveView] = useState('chat')
   const chatEndRef = useRef(null)
 
@@ -112,6 +110,12 @@ export default function App() {
     setLoading(false)
   }
 
+  const handleQuickAction = (query) => {
+    setInput(query)
+  }
+
+  const isWelcomeState = messages.length <= 1 && !loading
+
   return (
     <div className="app-container">
       <Sidebar
@@ -129,64 +133,87 @@ export default function App() {
       <main className="chat-main">
         <header className="mobile-header">
           <button className="menu-btn" onClick={() => setSidebarOpen(true)}>
-            <Menu size={20} />
+            <Menu size={18} />
           </button>
-          
-          <div className="flex items-center gap-3 ml-2 lg:ml-0">
-             <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center border border-indigo-500/30">
-                <Bot size={18} className="text-indigo-400" />
-             </div>
-             <span className="font-bold text-white tracking-tight">QuantPilot AI</span>
+
+          <div className="header-brand">
+            <div className="header-brand-icon">
+              <Bot size={18} />
+            </div>
+            <span className="header-brand-name">QuantPilot AI</span>
           </div>
 
-          {/* ── NEW: View toggle buttons (Chat vs Trading) ── */}
-          <div className="flex bg-slate-900/50 backdrop-blur-md rounded-xl p-1 border border-white/5 ml-auto mr-4">
+          <div className="view-toggle">
             <button
               onClick={() => setActiveView('chat')}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-300 flex items-center gap-2 ${
-                activeView === 'chat' 
-                  ? 'bg-indigo-500 text-white shadow-lg' 
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
+              className={`view-toggle-btn ${activeView === 'chat' ? 'active' : ''}`}
             >
-              <MessageSquare size={14} />
+              <MessageSquare size={13} />
               CHAT
             </button>
             <button
               onClick={() => setActiveView('trading')}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all duration-300 flex items-center gap-2 ${
-                activeView === 'trading' 
-                  ? 'bg-indigo-500 text-white shadow-lg' 
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
+              className={`view-toggle-btn ${activeView === 'trading' ? 'active' : ''}`}
             >
-              <BarChart2 size={14} />
+              <BarChart2 size={13} />
               TERMINAL
             </button>
           </div>
 
-          <button className="p-2 hover:bg-white/5 rounded-lg transition-colors lg:hidden" onClick={handleNewChat}>
-            <PlusCircle size={20} className="text-slate-400" />
+          <button className="header-new-chat-btn" onClick={handleNewChat}>
+            <PlusCircle size={20} />
           </button>
         </header>
 
-        <div className="flex-1 relative overflow-hidden">
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           {activeView === 'trading' ? (
-            <div className="trading-view-container h-full">
+            <div className="trading-view-container">
               <TradingPanel />
             </div>
           ) : (
-            <div className="h-full flex flex-col">
+            <div className="chat-view">
               <div className="chat-history">
+                {isWelcomeState && (
+                  <div className="welcome-screen">
+                    <div className="welcome-logo">
+                      <Bot size={32} />
+                    </div>
+                    <h1 className="welcome-title">
+                      Welcome to <span className="text-gradient-mixed">QuantPilot</span>
+                    </h1>
+                    <p className="welcome-subtitle">
+                      Your AI-powered stock analysis assistant. Get real-time quotes, technical analysis, pattern detection, and automated trading signals.
+                    </p>
+                    <div className="welcome-chips">
+                      <button className="welcome-chip" onClick={() => handleQuickAction("What is the price of AAPL?")}>
+                        <DollarSign size={15} className="welcome-chip-icon" />
+                        AAPL Stock Price
+                      </button>
+                      <button className="welcome-chip" onClick={() => handleQuickAction("Give me a full analysis of TSLA")}>
+                        <TrendingUp size={15} className="welcome-chip-icon" />
+                        Analyze TSLA
+                      </button>
+                      <button className="welcome-chip" onClick={() => handleQuickAction("Show me today's top gainers")}>
+                        <Zap size={15} className="welcome-chip-icon" />
+                        Top Gainers
+                      </button>
+                      <button className="welcome-chip" onClick={() => handleQuickAction("Scan NVDA for chart patterns")}>
+                        <Search size={15} className="welcome-chip-icon" />
+                        Scan NVDA Patterns
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {messages.map((msg, idx) => (
                   <div key={idx} className={`message ${msg.role} animate-fade-in`}>
                     <div className="icon">
-                      {msg.role === 'user' ? <User size={20} /> : <Bot size={20} />}
+                      {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
                     </div>
                     <div className="bubble">
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                       {msg.content.includes("DASHBOARD:") && (
-                        <div className="mt-8">
+                        <div style={{ marginTop: '24px' }}>
                           <StockCard symbol={msg.content.split("DASHBOARD:")[1].trim().split(" ")[0].split("\n")[0]} />
                         </div>
                       )}
@@ -196,11 +223,11 @@ export default function App() {
 
                 {loading && (
                   <div className="message assistant animate-fade-in">
-                    <div className="icon"><Bot size={20} /></div>
-                    <div className="bubble loading">
-                      <div className="flex items-center gap-3 bg-slate-900/50 rounded-2xl px-6 py-4 border border-white/5">
-                        <Loader2 size={18} className="animate-spin text-indigo-400" />
-                        <span className="text-sm font-medium text-slate-400">Analyzing market data...</span>
+                    <div className="icon"><Bot size={18} /></div>
+                    <div className="bubble">
+                      <div className="loading-indicator">
+                        <Loader2 size={16} className="loading-spinner" />
+                        <span className="loading-text">Analyzing market data...</span>
                       </div>
                     </div>
                   </div>
@@ -215,10 +242,10 @@ export default function App() {
                     placeholder="Ask me anything about stocks..."
                     value={input}
                     onChange={e => setInput(e.target.value)}
-                    onKeyPress={e => e.key === "Enter" && sendMessage()}
+                    onKeyDown={e => e.key === "Enter" && sendMessage()}
                   />
                   <button className="send-btn" onClick={sendMessage} disabled={loading || !input.trim()}>
-                    {loading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                    {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
                   </button>
                 </div>
               </div>

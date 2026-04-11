@@ -180,7 +180,7 @@ Open a **new terminal** (keep the backend running):
 
 ```bash
 # Navigate to the frontend directory
-cd frontend/frontend
+cd frontend
 
 # Install Node.js dependencies
 npm install
