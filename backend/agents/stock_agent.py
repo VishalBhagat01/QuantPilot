@@ -8,8 +8,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import BaseModel, Field
-from backend.db.db import get_pool
-from backend.ingestion.tool import (
+from db.db import get_pool
+from ingestion.tool import (
     # -------- FINNHUB --------
     get_stock_price,
     get_stock_news,
@@ -53,7 +53,7 @@ load_dotenv()
 # -------------------
 # Constants
 # -------------------
-MAX_LOOPS = 6  
+MAX_LOOPS = 5
 
 # -------------------
 # Structured Output Schemas
@@ -141,7 +141,7 @@ tools_list = [
 ]
 
 # Bind tools to the Analyst LLM — enables native tool calling
-analyst_llm = llm.bind_tools(tools_list)
+analyst_llm = llm2.bind_tools(tools_list)
 
 tool_map = {t.name: t for t in tools_list}
 

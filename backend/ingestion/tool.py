@@ -449,8 +449,8 @@ def detect_chart_patterns(symbol: str):
         - signal_confidence: Confidence in the signal (0-100%)
         - reasoning: Explanation of why this signal was generated
     """
-    from backend.pattern_detection.pattern_detector import analyze_chart
-    from backend.trading.signal_engine import generate_signal
+    from pattern_detection.pattern_detector import analyze_chart
+    from trading.signal_engine import generate_signal
 
     # Step 1: Run the YOLOv8 pattern detection pipeline
     analysis = analyze_chart(symbol, period="3mo")
@@ -515,7 +515,7 @@ def get_broker_account():
         - status: Account status (ACTIVE, etc.)
         - paper: Whether this is paper trading (true/false)
     """
-    from backend.trading.broker import get_account_info
+    from trading.broker import get_account_info
     return get_account_info()
 
 
@@ -540,7 +540,7 @@ def get_broker_positions():
         - unrealized_pl: Unrealized profit/loss in dollars
         - unrealized_pl_pct: Unrealized P&L as a percentage
     """
-    from backend.trading.broker import get_positions
+    from trading.broker import get_positions
     return get_positions()
 
 
@@ -576,7 +576,7 @@ def place_trade(symbol: str, qty: int, side: str, order_type: str = "market"):
         - qty: Shares ordered
         - side: buy or sell
     """
-    from backend.trading.broker import place_order
+    from trading.broker import place_order
     return place_order(
         symbol=symbol,
         qty=qty,
@@ -604,5 +604,5 @@ def close_trade(symbol: str):
     Returns:
         Dictionary with close order confirmation or error message.
     """
-    from backend.trading.broker import close_position
+    from trading.broker import close_position
     return close_position(symbol)

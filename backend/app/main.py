@@ -2,8 +2,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from backend.agents.stock_agent import graph, saver, StockAnalysisResponse
-from backend.db.db import get_db, release_db, init_db
+from agents.stock_agent import graph, saver, StockAnalysisResponse
+from db.db import get_db, release_db, init_db
+from ingestion.tool import fetch_stock_dashboard_data
+from trading.broker import get_account_info, get_positions, get_recent_orders
+from pattern_detection.pattern_detector import analyze_chart
+from trading.signal_engine import generate_signal
 from fastapi.middleware.cors import CORSMiddleware
 import uuid
 import json
@@ -183,7 +187,7 @@ def get_dashboard_data(req: Dict[str, str]):
         raise HTTPException(status_code=400, detail="Symbol is required")
 
     try:
-        from backend.ingestion.tool import fetch_stock_dashboard_data
+        from ingestion.tool import fetch_stock_dashboard_data
         return fetch_stock_dashboard_data(symbol)
     except Exception as e:
         print(f"[ERROR] Dashboard fetch failed: {e}")
@@ -209,7 +213,6 @@ def get_trading_account():
     Used by the frontend TradingPanel to display account overview.
     """
     try:
-        from backend.trading.broker import get_account_info
         return get_account_info()
     except Exception as e:
         print(f"[ERROR] Trading account fetch failed: {e}")
@@ -227,7 +230,6 @@ def get_trading_positions():
     Used by the frontend TradingPanel to display the portfolio table.
     """
     try:
-        from backend.trading.broker import get_positions
         return get_positions()
     except Exception as e:
         print(f"[ERROR] Positions fetch failed: {e}")
@@ -255,8 +257,6 @@ def scan_chart_patterns(symbol: str):
         Dictionary with patterns, signal, confidence, and reasoning.
     """
     try:
-        from backend.pattern_detection.pattern_detector import analyze_chart
-        from backend.trading.signal_engine import generate_signal
 
         # Step 1: Run YOLOv8 pattern detection
         analysis = analyze_chart(symbol, period="3mo")
@@ -306,7 +306,6 @@ def get_trading_orders():
     Used by the frontend TradingPanel to display order history.
     """
     try:
-        from backend.trading.broker import get_recent_orders
         return get_recent_orders(limit=10)
     except Exception as e:
         print(f"[ERROR] Orders fetch failed: {e}")

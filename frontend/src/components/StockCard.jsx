@@ -15,7 +15,7 @@ const StockCard = ({ symbol }) => {
         const fetchData = async () => {
             try {
                 setLoading(true);
-                const response = await axios.get(`http://localhost:8000/stock/${symbol}`);
+                const response = await axios.post(`http://localhost:8000/agent/stock`, { symbol });
                 setData(response.data);
                 setError(null);
             } catch (err) {

@@ -131,7 +131,7 @@ def _get_model():
             # ---------------------------------------------------------------
             model_path = hf_hub_download(
                 repo_id="foduucom/stockmarket-pattern-detection-yolov8",
-                filename="best.pt"
+                filename="model.pt"
             )
             logger.info(f"[PATTERN] Model weights downloaded to: {model_path}")
             _model = YOLO(model_path)

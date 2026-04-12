@@ -26,7 +26,7 @@
 import logging
 from typing import List, Optional
 from dataclasses import dataclass, field
-from backend.pattern_detection.pattern_detector import DetectedPattern
+from pattern_detection.pattern_detector import DetectedPattern
 
 logger = logging.getLogger(__name__)
 
