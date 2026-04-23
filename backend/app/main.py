@@ -17,22 +17,33 @@ def startup_event():
     import psycopg
     import os
 
-    init_db()
-
-    conn_info = os.getenv("DATABASE_URL") + "?sslmode=require"
+    # All DB setup is best-effort — app must start even if DB is temporarily unreachable
     try:
-        with psycopg.connect(conn_info, autocommit=True) as conn:
+        init_db()
+    except Exception as e:
+        print(f"[DB] Warning: init_db failed ({e}), will retry on first request.")
 
+    db_url = os.getenv("DATABASE_URL", "").strip()
+    if not db_url:
+        print("[DB] Warning: DATABASE_URL not set, skipping PostgresSaver setup.")
+        return
+
+    conninfo = db_url if "sslmode" in db_url else db_url + "?sslmode=require"
+    try:
+        with psycopg.connect(conninfo, autocommit=True, connect_timeout=10) as conn:
             setup_saver = PostgresSaver(conn)
             setup_saver.setup()
             print("[DB] PostgresSaver tables ensured (autocommit).")
     except Exception as e:
         print(f"[DB] Warning: PostgresSaver setup failed: {e}")
         try:
-            saver.setup()
-            print("[DB] PostgresSaver tables ensured (fallback).")
+            if saver:
+                saver.setup()
+                print("[DB] PostgresSaver tables ensured (fallback).")
         except Exception as e2:
-            print(f"[DB] Error: Persistent storage setup totally failed: {e2}")
+            print(f"[DB] Warning: Persistent storage setup failed: {e2}")
+
+    print("[STARTUP] App ready.")
 
 app.add_middleware(
     CORSMiddleware,
