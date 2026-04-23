@@ -390,11 +390,16 @@ builder.add_conditional_edges("reviewer", route_next, {
 
 builder.add_edge("tools", "analyst")
 
-saver = PostgresSaver(get_pool())
+try:
+    saver = PostgresSaver(get_pool())
+    graph = builder.compile(checkpointer=saver)
+    print("[AGENT] Graph compiled with PostgreSQL checkpointer.")
+except Exception as e:
+    print(f"[AGENT] WARNING: DB checkpointer failed ({e}), running without persistence.")
+    saver = None
+    graph = builder.compile()
 
-graph = builder.compile(checkpointer=saver)
-
-__all__ = ["graph", "StockAnalysisResponse", "DataPoint"]
+__all__ = ["graph", "StockAnalysisResponse", "DataPoint", "saver"]
 
 if __name__ == "__main__":
     config = {"configurable": {"thread_id": "1"}}
