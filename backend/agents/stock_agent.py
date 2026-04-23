@@ -3,7 +3,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint  # noqa: F401 (disabled, kept for local dev)
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -83,15 +83,15 @@ llm3 = ChatGroq(
     temperature=0
 )
 
-# Open-source model from HF (for testing)
-llm_hf = ChatHuggingFace(
-    llm=HuggingFaceEndpoint(
-        repo_id="mistralai/Mistral-7B-Instruct-v0.3",
-        task="text-generation",
-        max_new_tokens=1024,
-        do_sample=False,
-    )
-)
+# HuggingFace model disabled — not used in graph, blocks startup on Render
+# llm_hf = ChatHuggingFace(
+#     llm=HuggingFaceEndpoint(
+#         repo_id="mistralai/Mistral-7B-Instruct-v0.3",
+#         task="text-generation",
+#         max_new_tokens=1024,
+#         do_sample=False,
+#     )
+# )
 
 
 tools_list = [
