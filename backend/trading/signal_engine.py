@@ -1,55 +1,16 @@
-# =============================================================================
-# signal_engine.py — Trading Signal Generator
-# =============================================================================
-#
-# PURPOSE:
-#   Converts detected chart patterns from YOLOv8 into actionable trading
-#   signals (BUY / SELL / HOLD) with a confidence-weighted scoring system.
-#
-# HOW THE SCORING WORKS:
-#   Each pattern has a predefined signal direction and weight:
-#     - Bullish patterns (W_Bottom, H&S Bottom) → positive score
-#     - Bearish patterns (M_Head, H&S Top) → negative score
-#     - Neutral patterns (Triangle, StockLine) → near-zero score
-#
-#   The final signal is determined by the weighted average of all detected
-#   patterns, adjusted by their confidence scores. This prevents a single
-#   low-confidence detection from triggering a trade.
-#
-# SIGNAL THRESHOLDS:
-#   score > +0.3  → BUY signal
-#   score < -0.3  → SELL signal
-#   otherwise     → HOLD signal
-#
-# =============================================================================
+"""Map detected chart patterns into BUY/SELL/HOLD signals."""
 
 import logging
 from typing import List, Optional
 from dataclasses import dataclass, field
-from pattern_detection.pattern_detector import DetectedPattern
+from backend.pattern_detection.pattern_detector import DetectedPattern
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# PATTERN → SIGNAL MAPPING
-# =============================================================================
-# Each pattern is mapped to:
-#   direction: "bullish", "bearish", or "neutral"
-#   weight: How strongly this pattern signals a trade (0.0 to 1.0)
-#   description: Human-readable explanation for the agent/user
-#
-# These mappings are based on classical technical analysis theory.
-# Weights are conservative to avoid overconfidence in a single pattern.
-# =============================================================================
-
 PATTERN_SIGNAL_MAP = {
-    # ---------------------------------------------------------------
-    # BULLISH PATTERNS — Indicate a potential price increase
-    # ---------------------------------------------------------------
     'Head and shoulders bottom': {
         'direction': 'bullish',
-        'weight': 0.85,       # Strong bullish — reliable reversal pattern
+        'weight': 0.85,
         'signal': 'BUY',
         'description': (
             'Inverse Head & Shoulders detected — one of the most reliable '
@@ -58,20 +19,16 @@ PATTERN_SIGNAL_MAP = {
     },
     'W_Bottom': {
         'direction': 'bullish',
-        'weight': 0.75,       # Strong bullish — double bottom support
+        'weight': 0.75,
         'signal': 'BUY',
         'description': (
             'Double Bottom (W pattern) detected — price tested support '
             'twice and bounced. Indicates strong buying pressure.'
         ),
     },
-    
-    # ---------------------------------------------------------------
-    # BEARISH PATTERNS — Indicate a potential price decrease
-    # ---------------------------------------------------------------
     'Head and shoulders top': {
         'direction': 'bearish',
-        'weight': 0.85,       # Strong bearish — reliable reversal pattern
+        'weight': 0.85,
         'signal': 'SELL',
         'description': (
             'Head & Shoulders Top detected — one of the most reliable '
@@ -80,20 +37,16 @@ PATTERN_SIGNAL_MAP = {
     },
     'M_Head': {
         'direction': 'bearish',
-        'weight': 0.75,       # Strong bearish — double top resistance
+        'weight': 0.75,
         'signal': 'SELL',
         'description': (
             'Double Top (M pattern) detected — price tested resistance '
             'twice and rejected. Indicates strong selling pressure.'
         ),
     },
-    
-    # ---------------------------------------------------------------
-    # NEUTRAL PATTERNS — Wait for breakout direction
-    # ---------------------------------------------------------------
     'Triangle': {
         'direction': 'neutral',
-        'weight': 0.40,       # Moderate — needs breakout confirmation
+        'weight': 0.40,
         'signal': 'HOLD',
         'description': (
             'Triangle pattern detected — price is consolidating. '
@@ -102,7 +55,7 @@ PATTERN_SIGNAL_MAP = {
     },
     'StockLine': {
         'direction': 'neutral',
-        'weight': 0.20,       # Weak — just a trend line
+        'weight': 0.20,
         'signal': 'HOLD',
         'description': (
             'Stock trend line detected — indicates ongoing trend but '
@@ -111,10 +64,6 @@ PATTERN_SIGNAL_MAP = {
     },
 }
 
-
-# =============================================================================
-# DATA CLASSES — Structured signal output
-# =============================================================================
 
 @dataclass
 class TradingSignal:
@@ -137,22 +86,9 @@ class TradingSignal:
     individual_signals: List[dict] = field(default_factory=list)
 
 
-# =============================================================================
-# SIGNAL THRESHOLDS — Controls how aggressive the signal generator is
-# =============================================================================
-# Adjust these if you want more/fewer trade signals:
-#   Lower thresholds = more trades triggered (more aggressive)
-#   Higher thresholds = fewer trades triggered (more conservative)
-# =============================================================================
-
 BUY_THRESHOLD = 0.3     # Weighted score above +0.3 → BUY
 SELL_THRESHOLD = -0.3    # Weighted score below -0.3 → SELL
 MIN_CONFIDENCE = 0.30    # Ignore patterns with confidence below 30%
-
-
-# =============================================================================
-# SIGNAL GENERATION — Core logic
-# =============================================================================
 
 def generate_signal(patterns: List[DetectedPattern]) -> TradingSignal:
     """
@@ -183,9 +119,6 @@ def generate_signal(patterns: List[DetectedPattern]) -> TradingSignal:
         >>> print(signal.signal)  # "SELL"
     """
     
-    # ---------------------------------------------------------------
-    # Step 1: Handle edge case — no patterns detected
-    # ---------------------------------------------------------------
     if not patterns:
         return TradingSignal(
             signal="HOLD",
@@ -201,9 +134,6 @@ def generate_signal(patterns: List[DetectedPattern]) -> TradingSignal:
             individual_signals=[],
         )
     
-    # ---------------------------------------------------------------
-    # Step 2: Filter patterns by minimum confidence threshold
-    # ---------------------------------------------------------------
     valid_patterns = [
         p for p in patterns 
         if p.confidence >= MIN_CONFIDENCE
@@ -224,31 +154,23 @@ def generate_signal(patterns: List[DetectedPattern]) -> TradingSignal:
             individual_signals=[],
         )
     
-    # ---------------------------------------------------------------
-    # Step 3: Calculate weighted signal score
-    # ---------------------------------------------------------------
     total_score = 0.0
     total_weight = 0.0
     individual_signals = []
     
     for pattern in valid_patterns:
-        # Look up this pattern's signal configuration
         signal_config = PATTERN_SIGNAL_MAP.get(pattern.name)
         
         if signal_config is None:
-            # Unknown pattern type — skip but log it
             logger.warning(f"[SIGNAL] Unknown pattern: {pattern.name}")
             continue
         
-        # Calculate this pattern's contribution to the total score
         direction_multiplier = {
-            'bullish': +1.0,   # Positive = buy pressure
-            'bearish': -1.0,   # Negative = sell pressure
-            'neutral':  0.0,   # Zero = no directional bias
+            'bullish': +1.0,
+            'bearish': -1.0,
+            'neutral':  0.0,
         }.get(signal_config['direction'], 0.0)
         
-        # Score = direction * weight * confidence
-        # Example: H&S Top at 82% confidence = -1.0 * 0.85 * 0.82 = -0.697
         pattern_score = direction_multiplier * signal_config['weight'] * pattern.confidence
         
         total_score += pattern_score
@@ -264,17 +186,11 @@ def generate_signal(patterns: List[DetectedPattern]) -> TradingSignal:
             'description': signal_config['description'],
         })
     
-    # ---------------------------------------------------------------
-    # Step 4: Average the score (normalized by total weight)
-    # ---------------------------------------------------------------
     if total_weight > 0:
         avg_score = total_score / total_weight
     else:
         avg_score = 0.0
     
-    # ---------------------------------------------------------------
-    # Step 5: Map score to signal using thresholds
-    # ---------------------------------------------------------------
     if avg_score > BUY_THRESHOLD:
         final_signal = "BUY"
     elif avg_score < SELL_THRESHOLD:
@@ -282,12 +198,8 @@ def generate_signal(patterns: List[DetectedPattern]) -> TradingSignal:
     else:
         final_signal = "HOLD"
     
-    # Confidence = how strongly we believe in this signal (absolute score)
     signal_confidence = min(abs(avg_score), 1.0)
     
-    # ---------------------------------------------------------------
-    # Step 6: Build human-readable reasoning
-    # ---------------------------------------------------------------
     pattern_summary = ", ".join(
         f"{s['pattern']} ({s['confidence']:.0%} conf, {s['signal']})"
         for s in individual_signals
@@ -302,7 +214,6 @@ def generate_signal(patterns: List[DetectedPattern]) -> TradingSignal:
         f"Signal: {final_signal} with {signal_confidence:.0%} confidence.\n"
     )
     
-    # Add pattern-specific insights
     for sig in individual_signals:
         reasoning += f"\n• {sig['pattern']}: {sig['description']}"
     

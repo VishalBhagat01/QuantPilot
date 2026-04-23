@@ -8,6 +8,7 @@ load_dotenv()
 
 _pool = None
 
+
 def get_pool():
     global _pool
     if _pool is None:
@@ -16,15 +17,18 @@ def get_pool():
             min_size=2,
             max_size=10,
             timeout=30,
-            kwargs={"row_factory": dict_row}
+            kwargs={"row_factory": dict_row},
         )
     return _pool
+
 
 def get_db():
     return get_pool().getconn()
 
+
 def release_db(conn):
     get_pool().putconn(conn)
+
 
 def init_db():
     conn = get_db()

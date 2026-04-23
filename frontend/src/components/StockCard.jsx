@@ -4,7 +4,7 @@ import { TrendingUp, TrendingDown, Activity, DollarSign, BarChart2, Info, Zap } 
 import StockChart from './StockChart';
 import './StockCard.css';
 
-const StockCard = ({ symbol }) => {
+const StockCard = ({ symbol, onTrade }) => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -109,7 +109,10 @@ const StockCard = ({ symbol }) => {
             </div>
 
             <div className="sc-actions">
-                <button className="sc-trade-btn">
+                <button 
+                    className="sc-trade-btn"
+                    onClick={() => onTrade && onTrade(data.symbol)}
+                >
                     <Zap size={16} />
                     TRADE ASSET
                 </button>

@@ -1,35 +1,4 @@
-# =============================================================================
-# broker.py — Alpaca Markets Broker Integration
-# =============================================================================
-#
-# PURPOSE:
-#   Provides a clean interface to the Alpaca Trading API for executing
-#   trades (buy/sell) from the stock analysis agent. Defaults to PAPER
-#   TRADING (sandbox) so no real money is at risk.
-#
-# SETUP:
-#   1. Sign up at https://alpaca.markets (free)
-#   2. Get your API Key and Secret Key from the dashboard
-#   3. Add to your .env file:
-#        ALPACA_API_KEY=your_key_here
-#        ALPACA_SECRET_KEY=your_secret_here
-#        ALPACA_PAPER=true
-#
-# FEATURES:
-#   - Account info (cash, buying power, equity)
-#   - Position tracking (current holdings, P&L)
-#   - Order execution (market, limit, stop orders)
-#   - Order status tracking
-#   - Position closing
-#   - Safety guards (max position size, paper trading default)
-#
-# SAFETY:
-#   - Paper trading is the default (ALPACA_PAPER=true)
-#   - Maximum single order size: 100 shares (configurable)
-#   - Maximum single order value: $10,000 (configurable)
-#   - All trades are logged for audit trail
-#
-# =============================================================================
+"""Alpaca broker integration with lightweight safety guards."""
 
 import os
 import logging
@@ -40,20 +9,8 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# SAFETY LIMITS — Prevent accidental large trades
-# =============================================================================
-# These are hardcoded safety limits. Even if the agent tries to place a
-# larger order, it will be rejected at this layer. Adjust as needed.
-# =============================================================================
-
 MAX_SHARES_PER_ORDER = 100       # Max shares in a single order
 MAX_ORDER_VALUE_USD = 10_000     # Max dollar value of a single order
-
-
-# =============================================================================
-# GLOBAL BROKER INSTANCE — Singleton pattern for the trading client
-# =============================================================================
 
 _trading_client = None
 
@@ -87,9 +44,6 @@ def _get_trading_client():
         api_key = os.getenv("ALPACA_API_KEY")
         secret_key = os.getenv("ALPACA_SECRET_KEY")
         
-        # ---------------------------------------------------------------
-        # Validate credentials exist before attempting to connect
-        # ---------------------------------------------------------------
         if not api_key or not secret_key:
             raise ValueError(
                 "Alpaca API keys not configured! Add ALPACA_API_KEY and "
@@ -97,16 +51,11 @@ def _get_trading_client():
                 "https://alpaca.markets"
             )
         
-        # ---------------------------------------------------------------
-        # PAPER TRADING DEFAULT:
-        #   paper=True → Uses Alpaca's sandbox environment
-        #   paper=False → LIVE TRADING WITH REAL MONEY (use at own risk!)
-        # ---------------------------------------------------------------
         paper = os.getenv("ALPACA_PAPER", "true").lower() == "true"
         
         logger.info(
             f"[BROKER] Initializing Alpaca client "
-            f"({'PAPER' if paper else '⚠️ LIVE'} trading)"
+            f"({'PAPER' if paper else 'LIVE'} trading)"
         )
         
         _trading_client = TradingClient(api_key, secret_key, paper=paper)
@@ -114,10 +63,6 @@ def _get_trading_client():
     
     return _trading_client
 
-
-# =============================================================================
-# ACCOUNT INFORMATION
-# =============================================================================
 
 def get_account_info() -> Dict[str, Any]:
     """
@@ -152,10 +97,6 @@ def get_account_info() -> Dict[str, Any]:
         logger.error(f"[BROKER] Failed to get account info: {e}")
         return {"error": str(e)}
 
-
-# =============================================================================
-# POSITION TRACKING
-# =============================================================================
 
 def get_positions() -> List[Dict[str, Any]]:
     """
@@ -193,10 +134,6 @@ def get_positions() -> List[Dict[str, Any]]:
         logger.error(f"[BROKER] Failed to get positions: {e}")
         return [{"error": str(e)}]
 
-
-# =============================================================================
-# ORDER EXECUTION — Place BUY and SELL orders
-# =============================================================================
 
 def place_order(
     symbol: str,
@@ -237,16 +174,10 @@ def place_order(
     Raises:
         ValueError: If safety checks fail (qty too large, invalid params)
     """
-    # ---------------------------------------------------------------
-    # SAFETY CHECK 1: Validate side parameter
-    # ---------------------------------------------------------------
     side = side.lower().strip()
     if side not in ("buy", "sell"):
         raise ValueError(f"Invalid side: '{side}'. Must be 'buy' or 'sell'.")
     
-    # ---------------------------------------------------------------
-    # SAFETY CHECK 2: Enforce maximum shares per order
-    # ---------------------------------------------------------------
     if qty > MAX_SHARES_PER_ORDER:
         raise ValueError(
             f"Order quantity ({qty}) exceeds maximum allowed "
@@ -257,9 +188,6 @@ def place_order(
     if qty <= 0:
         raise ValueError(f"Order quantity must be positive, got: {qty}")
     
-    # ---------------------------------------------------------------
-    # SAFETY CHECK 3: Validate order type
-    # ---------------------------------------------------------------
     order_type = order_type.lower().strip()
     if order_type not in ("market", "limit", "stop"):
         raise ValueError(
@@ -284,7 +212,6 @@ def place_order(
         
         client = _get_trading_client()
         
-        # Map string parameters to Alpaca enums
         order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
         
         tif_map = {
@@ -295,9 +222,6 @@ def place_order(
         }
         tif = tif_map.get(time_in_force.lower(), TimeInForce.GTC)
         
-        # ---------------------------------------------------------------
-        # Create the appropriate order request object
-        # ---------------------------------------------------------------
         if order_type == "market":
             order_data = MarketOrderRequest(
                 symbol=symbol.upper(),
@@ -314,7 +238,6 @@ def place_order(
                 limit_price=limit_price,
             )
         else:
-            # Fallback to market order for unsupported types
             order_data = MarketOrderRequest(
                 symbol=symbol.upper(),
                 qty=qty,
@@ -322,9 +245,6 @@ def place_order(
                 time_in_force=tif,
             )
         
-        # ---------------------------------------------------------------
-        # Submit the order to Alpaca
-        # ---------------------------------------------------------------
         order = client.submit_order(order_data=order_data)
         
         result = {
@@ -345,10 +265,6 @@ def place_order(
         logger.error(f"[BROKER] Order failed: {e}")
         return {"error": str(e), "symbol": symbol, "qty": qty, "side": side}
 
-
-# =============================================================================
-# POSITION MANAGEMENT
-# =============================================================================
 
 def close_position(symbol: str) -> Dict[str, Any]:
     """
@@ -386,10 +302,6 @@ def close_position(symbol: str) -> Dict[str, Any]:
         return {"error": str(e), "symbol": symbol}
 
 
-# =============================================================================
-# ORDER HISTORY
-# =============================================================================
-
 def get_recent_orders(limit: int = 10) -> List[Dict[str, Any]]:
     """
     Retrieves recent order history from Alpaca.
@@ -406,7 +318,6 @@ def get_recent_orders(limit: int = 10) -> List[Dict[str, Any]]:
         
         client = _get_trading_client()
         
-        # Fetch all orders (filled, cancelled, etc.)
         request = GetOrdersRequest(
             status=QueryOrderStatus.ALL,
             limit=limit,

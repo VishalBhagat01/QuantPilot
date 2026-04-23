@@ -40,14 +40,10 @@ duckduckgo-search
 requests
 
 # =============================================
-# YOLOv8 Chart Pattern Detection
+# Data Science / Technical Analysis
 # =============================================
-# Powers foduucom/stockmarket-pattern-detection-yolov8 model
-# for detecting chart patterns (Head & Shoulders, Double Top/Bottom, etc.)
-ultralytics                   # YOLOv8 model framework
-huggingface-hub               # Downloads model weights from HuggingFace
-opencv-python                 # Image processing for chart analysis
-mplfinance                    # Generates candlestick chart images from OHLCV data
+pandas                        # Data processing and technical indicators
+numpy                         # Numerical computations
 matplotlib                    # Required by mplfinance
 Pillow                        # Image handling utilities
 yfinance                      # Fetches OHLCV price data from Yahoo Finance

@@ -1,31 +1,7 @@
-# =============================================================================
-# pattern_detector.py — YOLOv8 Stock Market Pattern Detection Engine
-# =============================================================================
-#
-# PURPOSE:
-#   This module generates candlestick chart images from real stock price data
-#   and runs the foduucom/stockmarket-pattern-detection-yolov8 model to detect
-#   chart patterns. Detected patterns are returned with confidence scores.
-#
-# HOW IT WORKS:
-#   1. Fetches OHLCV data using yfinance (last 3 months of daily data)
-#   2. Generates a candlestick chart image using mplfinance
-#   3. Runs YOLOv8 inference on the generated chart image
-#   4. Returns detected patterns with bounding boxes and confidence scores
-#
-# SUPPORTED PATTERNS (from the YOLOv8 model):
-#   - Head and shoulders bottom → Bullish reversal signal
-#   - Head and shoulders top    → Bearish reversal signal
-#   - M_Head (Double Top)       → Bearish reversal signal
-#   - W_Bottom (Double Bottom)  → Bullish reversal signal
-#   - Triangle                  → Continuation / breakout pending
-#   - StockLine                 → Trend line (neutral)
-#
-# DEPENDENCIES:
-#   pip install ultralytics yfinance mplfinance opencv-python Pillow
-#
-# =============================================================================
+"""YOLO-based stock chart pattern detection pipeline."""
 
+import matplotlib
+matplotlib.use("Agg")
 import os
 import tempfile
 import logging
@@ -33,12 +9,7 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
-# Setup logging for this module
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# DATA CLASSES — Structured output for pattern detection results
-# =============================================================================
 
 @dataclass
 class DetectedPattern:
@@ -74,31 +45,16 @@ class ChartAnalysis:
     error: Optional[str] = None
 
 
-# =============================================================================
-# PATTERN LABEL MAPPING — Maps model class indices to human-readable names
-# =============================================================================
-# These labels come directly from the YOLOv8 model's training configuration.
-# The model was trained to detect exactly these 6 pattern classes.
-# =============================================================================
-
 PATTERN_CLASSES = [
-    'Head and shoulders bottom',  # Class 0 — Bullish reversal
-    'Head and shoulders top',     # Class 1 — Bearish reversal
-    'M_Head',                     # Class 2 — Double Top (Bearish)
-    'StockLine',                  # Class 3 — Trend line (Neutral)
-    'Triangle',                   # Class 4 — Continuation pattern
-    'W_Bottom',                   # Class 5 — Double Bottom (Bullish)
+    'Head and shoulders bottom',
+    'Head and shoulders top',
+    'M_Head',
+    'StockLine',
+    'Triangle',
+    'W_Bottom',
 ]
 
-
-# =============================================================================
-# GLOBAL MODEL CACHE — Load the model once and reuse across requests
-# =============================================================================
-# Loading a YOLO model from HuggingFace takes ~5-10 seconds.
-# We cache it globally so subsequent predictions are instant (~100ms).
-# =============================================================================
-
-_model = None  # Will be loaded on first use (lazy initialization)
+_model = None
 
 
 def _get_model():
@@ -124,26 +80,13 @@ def _get_model():
             from ultralytics import YOLO
             from huggingface_hub import hf_hub_download
             
-            # ---------------------------------------------------------------
-            # Download the best.pt weights from HuggingFace Hub.
-            # hf_hub_download caches the file locally (~25MB) so subsequent
-            # calls are instant. Then we load it with the YOLO constructor.
-            # ---------------------------------------------------------------
             model_path = hf_hub_download(
                 repo_id="foduucom/stockmarket-pattern-detection-yolov8",
                 filename="model.pt"
             )
             logger.info(f"[PATTERN] Model weights downloaded to: {model_path}")
             _model = YOLO(model_path)
-            
-            # ---------------------------------------------------------------
-            # Configure inference parameters:
-            #   conf=0.25 → Minimum confidence threshold (25%)
-            #     Lower = more detections (more false positives)
-            #     Higher = fewer detections (may miss real patterns)
-            #   iou=0.45 → Non-Max Suppression IoU threshold
-            #     Controls overlap handling for duplicate detections
-            # ---------------------------------------------------------------
+
             _model.overrides['conf'] = 0.25
             _model.overrides['iou'] = 0.45
             
@@ -158,10 +101,6 @@ def _get_model():
     
     return _model
 
-
-# =============================================================================
-# CHART IMAGE GENERATION — Creates candlestick charts from price data
-# =============================================================================
 
 def generate_chart_image(symbol: str, period: str = "3mo") -> str:
     """
@@ -192,11 +131,6 @@ def generate_chart_image(symbol: str, period: str = "3mo") -> str:
     
     logger.info(f"[PATTERN] Fetching {period} of OHLCV data for {symbol}...")
     
-    # ---------------------------------------------------------------
-    # Step 1: Fetch historical OHLCV data from Yahoo Finance
-    # yfinance returns a pandas DataFrame with columns:
-    #   Open, High, Low, Close, Volume, Dividends, Stock Splits
-    # ---------------------------------------------------------------
     ticker = yf.Ticker(symbol)
     df = ticker.history(period=period)
     
@@ -205,30 +139,12 @@ def generate_chart_image(symbol: str, period: str = "3mo") -> str:
     
     logger.info(f"[PATTERN] Got {len(df)} data points for {symbol}")
     
-    # ---------------------------------------------------------------
-    # Step 2: Generate candlestick chart image
-    # We use a dark "nightclouds" style to match typical trading platforms.
-    # The chart includes volume bars and moving averages for better
-    # pattern context (the model was trained on similar looking charts).
-    # ---------------------------------------------------------------
-    
-    # Create a temp directory for chart images (cleaned up periodically)
     charts_dir = os.path.join(tempfile.gettempdir(), "stock_charts")
     os.makedirs(charts_dir, exist_ok=True)
-    
-    # Unique filename per symbol + timestamp to avoid collisions
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     chart_path = os.path.join(charts_dir, f"{symbol}_{timestamp}.png")
-    
-    # ---------------------------------------------------------------
-    # mplfinance configuration:
-    #   type='candle'   → Candlestick chart (not line or OHLC bars)
-    #   style='charles' → Classic trading chart colors (green/red)
-    #   volume=True     → Show volume bars below the chart
-    #   mav=(10, 20)    → 10-day and 20-day moving averages overlay
-    #   figsize=(12, 8) → Large enough for YOLOv8 to detect patterns
-    #   savefig=path    → Save directly to disk (no display needed)
-    # ---------------------------------------------------------------
+
     mpf.plot(
         df,
         type='candle',
@@ -243,10 +159,6 @@ def generate_chart_image(symbol: str, period: str = "3mo") -> str:
     logger.info(f"[PATTERN] Chart saved to: {chart_path}")
     return chart_path
 
-
-# =============================================================================
-# PATTERN DETECTION — Runs YOLOv8 inference on chart images
-# =============================================================================
 
 def detect_patterns(image_path: str) -> List[DetectedPattern]:
     """
@@ -272,33 +184,21 @@ def detect_patterns(image_path: str) -> List[DetectedPattern]:
     
     logger.info(f"[PATTERN] Running inference on: {image_path}")
     
-    # ---------------------------------------------------------------
-    # Run YOLOv8 prediction
-    #   save=False → Don't save annotated images (we just need the data)
-    #   verbose=False → Suppress console output from ultralytics
-    # ---------------------------------------------------------------
     results = model.predict(image_path, save=False, verbose=False)
     
     detected = []
     
     if results and len(results) > 0:
-        result = results[0]  # First (and only) image result
+        result = results[0]
         
         if result.boxes and len(result.boxes) > 0:
-            # ---------------------------------------------------------------
-            # Extract detections from YOLOv8 output:
-            #   result.boxes.cls   → Class indices (integers)
-            #   result.boxes.conf  → Confidence scores (0.0 to 1.0)
-            #   result.boxes.xyxy  → Bounding boxes [x1, y1, x2, y2]
-            # ---------------------------------------------------------------
             class_indices = result.boxes.cls.tolist()
             confidences = result.boxes.conf.tolist()
             bboxes = result.boxes.xyxy.tolist()
             
             for cls_idx, conf, bbox in zip(class_indices, confidences, bboxes):
                 cls_idx = int(cls_idx)
-                
-                # Map class index to pattern name (safety check for index)
+
                 if 0 <= cls_idx < len(PATTERN_CLASSES):
                     pattern_name = PATTERN_CLASSES[cls_idx]
                 else:
@@ -314,8 +214,7 @@ def detect_patterns(image_path: str) -> List[DetectedPattern]:
                     f"[PATTERN] Detected: {pattern_name} "
                     f"(confidence: {conf:.2%})"
                 )
-    
-    # Sort by confidence (highest first) — most reliable patterns first
+
     detected.sort(key=lambda p: p.confidence, reverse=True)
     
     if not detected:
@@ -323,10 +222,6 @@ def detect_patterns(image_path: str) -> List[DetectedPattern]:
     
     return detected
 
-
-# =============================================================================
-# FULL ANALYSIS PIPELINE — End-to-end: fetch → chart → detect → result
-# =============================================================================
 
 def analyze_chart(symbol: str, period: str = "3mo") -> ChartAnalysis:
     """
@@ -356,13 +251,10 @@ def analyze_chart(symbol: str, period: str = "3mo") -> ChartAnalysis:
     logger.info(f"[PATTERN] Starting full analysis for {symbol}...")
     
     try:
-        # Step 1 + 2: Fetch data and generate chart image
         chart_path = generate_chart_image(symbol, period)
-        
-        # Step 3: Run pattern detection
+
         patterns = detect_patterns(chart_path)
-        
-        # Step 4: Package results
+
         return ChartAnalysis(
             symbol=symbol.upper(),
             patterns=patterns,

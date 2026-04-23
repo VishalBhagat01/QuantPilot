@@ -1,16 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import Optional, Dict
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from agents.stock_agent import graph, saver, StockAnalysisResponse
-from db.db import get_db, release_db, init_db
-from ingestion.tool import fetch_stock_dashboard_data
-from trading.broker import get_account_info, get_positions, get_recent_orders
-from pattern_detection.pattern_detector import analyze_chart
-from trading.signal_engine import generate_signal
+from backend.agents.stock_agent import graph, saver
+from backend.db.db import get_db, release_db, init_db
+from backend.ingestion.tool import fetch_stock_dashboard_data, predict_stock_signal
+from backend.trading.broker import get_account_info, get_positions, get_recent_orders
 from fastapi.middleware.cors import CORSMiddleware
 import uuid
-import json
 from langgraph.checkpoint.postgres import PostgresSaver
 
 app = FastAPI()
@@ -61,32 +58,38 @@ def get_threads():
 
 
 def filter_messages(messages):
-    """
-    Filters out internal tool calls, tool messages, and system observations,
-    leaving only genuine User and Assistant messages.
-    """
+    """Return only user/assistant chat messages for frontend display."""
     filtered = []
     for msg in messages:
-        content = msg.content.strip() if hasattr(msg, 'content') else ""
+        raw_content = getattr(msg, "content", "")
+        if isinstance(raw_content, list):
+            text_parts = []
+            for part in raw_content:
+                if isinstance(part, dict):
+                    text_parts.append(part.get("text", ""))
+                else:
+                    text_parts.append(str(part))
+            text_content = "".join(text_parts)
+        else:
+            text_content = str(raw_content) if raw_content else ""
 
-        # Skip ToolMessages entirely (internal)
+        clean_content = text_content.strip()
+
         if isinstance(msg, ToolMessage):
             continue
 
-        # Skip AIMessages that are pure tool calls (no text content)
-        if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls and not content:
+        if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls and not clean_content:
             continue
 
-        # Skip internal system HumanMessages
         is_internal_human = isinstance(msg, HumanMessage) and (
-            content.startswith("Observation from") or
-            content.startswith("SYSTEM NOTICE") or
-            content.startswith("SYSTEM ERROR")
+            clean_content.startswith("Observation from") or
+            clean_content.startswith("SYSTEM NOTICE") or
+            clean_content.startswith("SYSTEM ERROR")
         )
 
         if not is_internal_human:
             role = "user" if isinstance(msg, HumanMessage) else "assistant"
-            filtered.append({"role": role, "content": msg.content})
+            filtered.append({"role": role, "content": clean_content})
 
     return filtered
 
@@ -142,7 +145,7 @@ def _upsert_thread(thread_id: str, query: str):
 
 @app.post("/analyze")
 def analyze_stock(req: StockRequest):
-    """Standard (non-streaming) analysis endpoint — backward compatible."""
+    """Non-streaming stock analysis endpoint."""
     thread_id = req.thread_id or str(uuid.uuid4())
     print(f"\n[BACKEND] Received query: {req.query}")
     print(f"[BACKEND] Thread ID: {thread_id}")
@@ -157,11 +160,9 @@ def analyze_stock(req: StockRequest):
             "loop_count": 0
         }, config=config)
 
-        # Use filtering logic to find the actual response
         filtered = filter_messages(result["messages"])
         final_response = "I've analyzed the data, but I'm having trouble providing a final answer. Please try a different query."
 
-        # Look for the last assistant message
         for msg in reversed(filtered):
             if msg["role"] == "assistant":
                 final_response = msg["content"]
@@ -187,31 +188,15 @@ def get_dashboard_data(req: Dict[str, str]):
         raise HTTPException(status_code=400, detail="Symbol is required")
 
     try:
-        from ingestion.tool import fetch_stock_dashboard_data
         return fetch_stock_dashboard_data(symbol)
     except Exception as e:
         print(f"[ERROR] Dashboard fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# =============================================================================
-# NEW: TRADING & PATTERN DETECTION API ENDPOINTS
-# =============================================================================
-# These endpoints provide direct REST access to the pattern detection engine
-# and Alpaca broker. They bypass the LLM agent loop for faster responses
-# and are used by the frontend TradingPanel component.
-# =============================================================================
-
 @app.get("/trading/account")
 def get_trading_account():
-    """
-    GET /trading/account
-    
-    Returns the Alpaca trading account information:
-    cash, buying power, equity, portfolio value, etc.
-    
-    Used by the frontend TradingPanel to display account overview.
-    """
+    """Return Alpaca trading account details."""
     try:
         return get_account_info()
     except Exception as e:
@@ -221,14 +206,7 @@ def get_trading_account():
 
 @app.get("/trading/positions")
 def get_trading_positions():
-    """
-    GET /trading/positions
-    
-    Returns all open positions from the Alpaca broker:
-    symbol, qty, market value, P&L, etc.
-    
-    Used by the frontend TradingPanel to display the portfolio table.
-    """
+    """Return all open Alpaca positions."""
     try:
         return get_positions()
     except Exception as e:
@@ -238,73 +216,35 @@ def get_trading_positions():
 
 @app.post("/trading/scan/{symbol}")
 def scan_chart_patterns(symbol: str):
-    """
-    POST /trading/scan/{symbol}
-    
-    Runs the full pattern detection + signal generation pipeline:
-    1. Fetches OHLCV data for the symbol
-    2. Generates a candlestick chart image
-    3. Runs YOLOv8 pattern detection
-    4. Generates BUY/SELL/HOLD signal
-    
-    This is the main endpoint for the pattern scanner in the TradingPanel.
-    It bypasses the LLM agent for speed (~5-10 seconds total).
-    
-    Args:
-        symbol: Stock ticker (path parameter, e.g., /trading/scan/AAPL)
-    
-    Returns:
-        Dictionary with patterns, signal, confidence, and reasoning.
-    """
+    """Run technical-analysis scan and return BUY/SELL/HOLD signal."""
     try:
+        result = predict_stock_signal.invoke({"symbol": symbol})
 
-        # Step 1: Run YOLOv8 pattern detection
-        analysis = analyze_chart(symbol, period="3mo")
-
-        if analysis.error:
+        if result.get("error"):
             return {
                 "symbol": symbol,
-                "error": analysis.error,
-                "patterns": [],
+                "error": result["error"],
                 "signal": "HOLD",
-                "signal_confidence": 0,
-                "reasoning": f"Pattern detection failed: {analysis.error}",
+                "confidence": "0%",
+                "reasoning": f"Analysis failed: {result['error']}",
             }
 
-        # Step 2: Generate trading signal from detected patterns
-        signal = generate_signal(analysis.patterns)
-
         return {
-            "symbol": analysis.symbol,
-            "patterns": [
-                {
-                    "name": p.name,
-                    "confidence": round(p.confidence * 100, 1),
-                }
-                for p in analysis.patterns
-            ],
-            "signal": signal.signal,
-            "signal_confidence": round(signal.confidence * 100, 1),
-            "score": signal.score,
-            "reasoning": signal.reasoning,
-            "individual_signals": signal.individual_signals,
-            "timestamp": analysis.analysis_timestamp,
+            "symbol": result.get("symbol"),
+            "signal": result.get("signal"),
+            "confidence": result.get("confidence"),
+            "reasoning": result.get("reasoning"),
+            "indicators": result.get("indicators", {}),
+            "timestamp": "generated_now"
         }
     except Exception as e:
-        print(f"[ERROR] Pattern scan failed for {symbol}: {e}")
+        print(f"[ERROR] Trading scan failed for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/trading/orders")
 def get_trading_orders():
-    """
-    GET /trading/orders
-    
-    Returns the 10 most recent orders from Alpaca:
-    order ID, symbol, qty, side, status, timestamps, etc.
-    
-    Used by the frontend TradingPanel to display order history.
-    """
+    """Return recent Alpaca orders."""
     try:
         return get_recent_orders(limit=10)
     except Exception as e:

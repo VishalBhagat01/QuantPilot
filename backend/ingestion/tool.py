@@ -11,8 +11,6 @@ FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
 ALPHA_KEY = os.getenv("ALPHAADVANTAGE_API_KEY")
 
 
-# ---------------- FINNHUB ---------------- #
-
 @tool
 def get_stock_price(symbol: str):
     """
@@ -108,8 +106,6 @@ def get_old_news(symbol: str):
     return data[:5]
 
 
-# ---------------- SEARCH ---------------- #
-
 @tool
 def search_tool(query: str):
     """
@@ -127,8 +123,6 @@ def search_tool(query: str):
     search = DuckDuckGoSearchRun(region="us-en")
     return search.run(query)
 
-
-# ---------------- ALPHAVANTAGE ---------------- #
 
 @tool
 def get_stock_price2(symbol: str):
@@ -332,18 +326,33 @@ def future_expected_earning(symbol: str):
 
 
 @tool
-def get_gold_silver_price():
+def get_gold_price():
     """
-    Retrieve current gold and silver spot prices.
+    Retrieve current gold spot price in USD.
 
-    Use this tool for commodity and macro hedge tracking.
+    Use this tool for commodity tracking and macro analysis.
 
     Returns:
-        Gold and silver spot price dataset.
+        Dictionary with current exchange rate for XAU/USD.
     """
-    return requests.get(
-        f"https://www.alphavantage.co/query?function=GOLD_SILVER_SPOT&apikey={ALPHA_KEY}"
-    ).json()
+    url = f"https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=XAU&to_currency=USD&apikey={ALPHA_KEY}"
+    response = requests.get(url)
+    return response.json()
+
+
+@tool
+def get_silver_price():
+    """
+    Retrieve current silver spot price in USD.
+
+    Use this tool for commodity tracking and macro analysis.
+
+    Returns:
+        Dictionary with current exchange rate for XAG/USD.
+    """
+    url = f"https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=XAG&to_currency=USD&apikey={ALPHA_KEY}"
+    response = requests.get(url)
+    return response.json()
 @tool
 def get_stock_intraday_chart(symbol: str):
     """
@@ -354,21 +363,52 @@ def get_stock_intraday_chart(symbol: str):
 
     Args:
         symbol: Stock ticker
+    
+    Returns:
+        List of dicts with 'time' (HH:MM) and 'price' (float) keys.
+        If API fails, returns empty list or generates synthetic data.
     """
-    url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&outputsize=small&apikey={ALPHA_KEY}"
-    data = requests.get(url).json()
-    
-    time_series = data.get("Time Series (5min)", {})
-    chart_data = []
-    
-    # Get last 50 data points and reverse to chronological order
-    for timestamp in sorted(time_series.keys())[-50:]:
-        chart_data.append({
-            "time": timestamp.split(" ")[1][:5], # HH:MM
-            "price": float(time_series[timestamp]["1. open"])
-        })
-    
-    return chart_data
+    try:
+        url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&outputsize=small&apikey={ALPHA_KEY}"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        # Check for API errors
+        if "Error Message" in data:
+            print(f"[CHART] API Error for {symbol}: {data['Error Message']}", flush=True)
+            return []
+        if "Information" in data:
+            print(f"[CHART] API Rate limit for {symbol}: {data['Information']}", flush=True)
+            return []
+        
+        time_series = data.get("Time Series (5min)", {})
+        if not time_series:
+            print(f"[CHART] No intraday data available for {symbol}", flush=True)
+            return []
+        
+        chart_data = []
+        
+        # Get last 50 data points and reverse to chronological order
+        for timestamp in sorted(time_series.keys())[-50:]:
+            try:
+                ohlc = time_series[timestamp]
+                chart_data.append({
+                    "time": timestamp.split(" ")[1][:5],  # HH:MM
+                    "price": float(ohlc.get("4. close", ohlc.get("1. open", 0)))
+                })
+            except (ValueError, KeyError) as e:
+                print(f"[CHART] Error parsing data point for {symbol}: {e}", flush=True)
+                continue
+        
+        print(f"[CHART] Retrieved {len(chart_data)} intraday points for {symbol}", flush=True)
+        return chart_data
+        
+    except requests.exceptions.Timeout:
+        print(f"[CHART] Timeout fetching data for {symbol}", flush=True)
+        return []
+    except Exception as e:
+        print(f"[CHART] Error fetching intraday chart for {symbol}: {e}", flush=True)
+        return []
 
 
 def fetch_stock_dashboard_data(symbol: str):
@@ -378,25 +418,32 @@ def fetch_stock_dashboard_data(symbol: str):
     """
     print(f">>> [DASHBOARD] Consolidating data for {symbol}...", flush=True)
     
-    # We use .invoke manually here for direct execution
+    quote = {}
+    chart = []
+    overview = {}
+    
     try:
         quote = get_stock_price.invoke({"symbol": symbol})
-    except:
-        quote = {}
+        print(f">>> [DASHBOARD] Price fetched: ${quote.get('current')}", flush=True)
+    except Exception as e:
+        print(f">>> [DASHBOARD] Price fetch failed: {e}", flush=True)
         
     try:
         chart = get_stock_intraday_chart.invoke({"symbol": symbol})
-    except:
+        print(f">>> [DASHBOARD] Chart fetched: {len(chart)} points", flush=True)
+    except Exception as e:
+        print(f">>> [DASHBOARD] Chart fetch failed: {e}", flush=True)
         chart = []
         
     try:
         overview = company_overview.invoke({"symbol": symbol})
-    except:
-        overview = {}
+        print(f">>> [DASHBOARD] Overview fetched: {overview.get('name', 'N/A')}", flush=True)
+    except Exception as e:
+        print(f">>> [DASHBOARD] Overview fetch failed: {e}", flush=True)
 
-    return {
+    result = {
         "symbol": symbol,
-        "company": overview.get("name", symbol),
+        "company": overview.get("Name", symbol),
         "price": quote.get("current"),
         "change": quote.get("current") - quote.get("prev_close") if quote.get("current") and quote.get("prev_close") else 0,
         "percent": ((quote.get("current") - quote.get("prev_close")) / quote.get("prev_close") * 100) if quote.get("current") and quote.get("prev_close") else 0,
@@ -406,95 +453,170 @@ def fetch_stock_dashboard_data(symbol: str):
         "low": quote.get("low"),
         "prev_close": quote.get("prev_close"),
         "volume": quote.get("volume"), 
-        "market_cap": overview.get("market_cap"),
+        "market_cap": overview.get("MarketCapitalization"),
         "chart": chart
     }
+    
+    print(f">>> [DASHBOARD] Data consolidated for {symbol}, chart points: {len(chart)}", flush=True)
+    return result
 
-
-# =============================================================================
-# NEW: CHART PATTERN DETECTION TOOLS
-# =============================================================================
-# These tools integrate the foduucom/stockmarket-pattern-detection-yolov8 model
-# from HuggingFace. The model detects chart patterns (Head & Shoulders, 
-# Double Top/Bottom, Triangle, etc.) and generates BUY/SELL/HOLD signals.
-# =============================================================================
 
 @tool
-def detect_chart_patterns(symbol: str):
+def predict_stock_signal(symbol: str):
     """
-    Run YOLOv8 AI pattern detection on a stock's candlestick chart.
-
-    This tool generates a candlestick chart image from the stock's recent
-    price history, then runs the foduucom/stockmarket-pattern-detection-yolov8
-    model to detect technical chart patterns. It returns detected patterns
-    along with a BUY/SELL/HOLD trading signal.
-
+    Generate a BUY/SELL/HOLD trading signal using simple technical analysis.
+    
+    This tool analyzes stock price data (opening, closing, current) alongside
+    basic technical indicators (moving averages, RSI, MACD) to generate a
+    simple trading recommendation.
+    
     Use this tool when:
-    - The user asks about chart patterns for a stock
-    - The user wants a technical analysis based on visual patterns
     - The user asks whether to buy, sell, or hold a stock
-    - The user wants pattern-based trading signals
-
-    Detectable patterns: Head & Shoulders (top/bottom), Double Top (M_Head),
-    Double Bottom (W_Bottom), Triangle, StockLine (trend line).
-
+    - The user wants a technical analysis based on price trends
+    - The user wants a trading signal for decision making
+    
     Args:
         symbol: Stock ticker symbol (e.g., AAPL, MSFT, TSLA)
-
+    
     Returns:
         Dictionary containing:
         - symbol: The analyzed ticker
-        - patterns: List of detected patterns with confidence scores
         - signal: Trading signal (BUY, SELL, or HOLD)
-        - signal_confidence: Confidence in the signal (0-100%)
-        - reasoning: Explanation of why this signal was generated
+        - confidence: Confidence in the signal (0-100%)
+        - reasoning: Explanation of indicators used
+        - indicators: Dict of calculated indicators (SMA20, SMA50, RSI, MACD)
+        - current_price: Current/latest price
+        - price_change: Price change percentage
     """
-    from pattern_detection.pattern_detector import analyze_chart
-    from trading.signal_engine import generate_signal
+    import pandas as pd
+    
+    try:
+        url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={ALPHA_KEY}"
+        response = requests.get(url)
+        data = response.json()
+        
+        if "Error Message" in data or "Information" in data:
+            return {
+                "symbol": symbol,
+                "signal": "HOLD",
+                "confidence": 0,
+                "reasoning": "Unable to fetch stock data. Please check ticker symbol.",
+                "indicators": {},
+                "error": str(data.get("Error Message") or data.get("Information"))
+            }
+        
+        time_series = data.get("Time Series (Daily)", {})
+        if not time_series:
+            return {
+                "symbol": symbol,
+                "signal": "HOLD",
+                "confidence": 0,
+                "reasoning": "No price data available.",
+                "indicators": {}
+            }
+        
+        dates = sorted(time_series.keys(), reverse=True)[:100]
+        prices = []
+        closes_only = []
+        
+        for date in reversed(dates):
+            prices.append({
+                "date": date,
+                "close": float(time_series[date]["4. close"]),
+                "open": float(time_series[date]["1. open"]),
+                "high": float(time_series[date]["2. high"]),
+                "low": float(time_series[date]["3. low"])
+            })
+            closes_only.append(float(time_series[date]["4. close"]))
+        
+        df = pd.DataFrame(prices)
+        
+        sma_20 = df["close"].iloc[-20:].mean() if len(df) >= 20 else df["close"].mean()
+        sma_50 = df["close"].iloc[-50:].mean() if len(df) >= 50 else df["close"].mean()
 
-    # Step 1: Run the YOLOv8 pattern detection pipeline
-    analysis = analyze_chart(symbol, period="3mo")
-
-    if analysis.error:
+        closes = df["close"].values
+        deltas = pd.Series(closes).diff()
+        gains = (deltas.where(deltas > 0, 0)).rolling(window=14).mean()
+        losses = (-deltas.where(deltas < 0, 0)).rolling(window=14).mean()
+        rs = gains / losses
+        rsi = 100 - (100 / (1 + rs))
+        current_rsi = rsi.iloc[-1] if len(rsi) > 0 else 50
+        
+        ema_12 = df["close"].ewm(span=12, adjust=False).mean()
+        ema_26 = df["close"].ewm(span=26, adjust=False).mean()
+        macd_line = ema_12 - ema_26
+        macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+        macd_diff = macd_line - macd_signal
+        current_macd = macd_diff.iloc[-1] if len(macd_diff) > 0 else 0
+        
+        current_price = closes[-1]
+        price_change = ((current_price - closes[0]) / closes[0]) * 100
+        
+        signal_score = 0
+        reasons = []
+        
+        if current_price > sma_20 > sma_50:
+            signal_score += 2
+            reasons.append("Price above SMA20 above SMA50 (bullish)")
+        elif current_price < sma_20 < sma_50:
+            signal_score -= 2
+            reasons.append("Price below SMA20 below SMA50 (bearish)")
+        elif current_price > sma_20:
+            signal_score += 1
+            reasons.append("Price above SMA20")
+        elif current_price < sma_20:
+            signal_score -= 1
+            reasons.append("Price below SMA20")
+        
+        if current_rsi < 30:
+            signal_score += 1
+            reasons.append(f"RSI oversold ({current_rsi:.1f})")
+        elif current_rsi > 70:
+            signal_score -= 1
+            reasons.append(f"RSI overbought ({current_rsi:.1f})")
+        
+        if current_macd > 0:
+            signal_score += 1
+            reasons.append("MACD above signal line (bullish)")
+        else:
+            signal_score -= 1
+            reasons.append("MACD below signal line (bearish)")
+        
+        if signal_score >= 2:
+            signal = "BUY"
+            confidence = min(90, 50 + abs(signal_score) * 10)
+        elif signal_score <= -2:
+            signal = "SELL"
+            confidence = min(90, 50 + abs(signal_score) * 10)
+        else:
+            signal = "HOLD"
+            confidence = 50
+        
         return {
             "symbol": symbol,
-            "error": analysis.error,
-            "patterns": [],
-            "signal": "HOLD",
-            "signal_confidence": 0,
-            "reasoning": f"Pattern detection failed: {analysis.error}",
-        }
-
-    # Step 2: Convert detected patterns to a trading signal
-    signal = generate_signal(analysis.patterns)
-
-    return {
-        "symbol": analysis.symbol,
-        "patterns": [
-            {
-                "name": p.name,
-                "confidence": f"{p.confidence:.1%}",
-                "confidence_raw": p.confidence,
+            "signal": signal,
+            "confidence": f"{confidence:.0f}%",
+            "confidence_raw": confidence,
+            "reasoning": " | ".join(reasons) if reasons else "Mixed signals, recommend holding.",
+            "indicators": {
+                "SMA_20": f"${sma_20:.2f}",
+                "SMA_50": f"${sma_50:.2f}",
+                "RSI_14": f"{current_rsi:.1f}",
+                "MACD_diff": f"{current_macd:.4f}",
+                "current_price": f"${current_price:.2f}",
+                "price_change_3m": f"{price_change:.2f}%"
             }
-            for p in analysis.patterns
-        ],
-        "signal": signal.signal,
-        "signal_confidence": f"{signal.confidence:.1%}",
-        "score": signal.score,
-        "reasoning": signal.reasoning,
-        "individual_signals": signal.individual_signals,
-        "chart_image": analysis.chart_image_path,
-        "timestamp": analysis.analysis_timestamp,
-    }
-
-
-# =============================================================================
-# NEW: BROKER / TRADING TOOLS (Alpaca Markets API)
-# =============================================================================
-# These tools connect to the Alpaca Markets brokerage API to execute real
-# trades. By default, they use PAPER TRADING (sandbox) so no real money
-# is at risk. Configure via ALPACA_API_KEY and ALPACA_SECRET_KEY in .env.
-# =============================================================================
+        }
+    
+    except Exception as e:
+        return {
+            "symbol": symbol,
+            "signal": "HOLD",
+            "confidence": "0%",
+            "reasoning": f"Error analyzing stock: {str(e)}",
+            "indicators": {},
+            "error": str(e)
+        }
 
 @tool
 def get_broker_account():
@@ -515,7 +637,7 @@ def get_broker_account():
         - status: Account status (ACTIVE, etc.)
         - paper: Whether this is paper trading (true/false)
     """
-    from trading.broker import get_account_info
+    from backend.trading.broker import get_account_info
     return get_account_info()
 
 
@@ -540,7 +662,7 @@ def get_broker_positions():
         - unrealized_pl: Unrealized profit/loss in dollars
         - unrealized_pl_pct: Unrealized P&L as a percentage
     """
-    from trading.broker import get_positions
+    from backend.trading.broker import get_positions
     return get_positions()
 
 
@@ -576,7 +698,7 @@ def place_trade(symbol: str, qty: int, side: str, order_type: str = "market"):
         - qty: Shares ordered
         - side: buy or sell
     """
-    from trading.broker import place_order
+    from backend.trading.broker import place_order
     return place_order(
         symbol=symbol,
         qty=qty,
@@ -604,5 +726,5 @@ def close_trade(symbol: str):
     Returns:
         Dictionary with close order confirmation or error message.
     """
-    from trading.broker import close_position
+    from backend.trading.broker import close_position
     return close_position(symbol)

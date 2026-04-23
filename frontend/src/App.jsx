@@ -214,7 +214,10 @@ export default function App() {
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                       {msg.content.includes("DASHBOARD:") && (
                         <div style={{ marginTop: '24px' }}>
-                          <StockCard symbol={msg.content.split("DASHBOARD:")[1].trim().split(" ")[0].split("\n")[0]} />
+                          <StockCard 
+                            symbol={msg.content.split("DASHBOARD:")[1].trim().split(" ")[0].split("\n")[0]}
+                            onTrade={(symbol) => setActiveView('trading')}
+                          />
                         </div>
                       )}
                     </div>
