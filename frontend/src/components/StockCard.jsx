@@ -15,7 +15,8 @@ const StockCard = ({ symbol, onTrade }) => {
         const fetchData = async () => {
             try {
                 setLoading(true);
-                const response = await axios.post(`http://localhost:8000/agent/stock`, { symbol });
+                const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
+                const response = await axios.post(`${API_BASE}/agent/stock`, { symbol });
                 setData(response.data);
                 setError(null);
             } catch (err) {

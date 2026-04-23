@@ -20,7 +20,7 @@ def get_pool():
             conninfo=conninfo,
             min_size=0,
             max_size=5,
-            timeout=10,
+            timeout=30,
             kwargs={"row_factory": dict_row},
         )
     return _pool
