@@ -104,6 +104,7 @@ def filter_messages(messages):
 
     return filtered
 
+# thread management endpoints
 @app.get("/threads/{thread_id}")
 def get_thread_history(thread_id: str):
     config = {"configurable": {"thread_id": thread_id}}
