@@ -1,5 +1,5 @@
 # =============================================
-# Core LLM / LangChain Stack
+# LangChain Stack
 # =============================================
 langchain-core
 langchain
@@ -40,7 +40,7 @@ duckduckgo-search
 requests
 
 # =============================================
-# Data Science / Technical Analysis
+# Technical Analysis
 # =============================================
 pandas                        # Data processing and technical indicators
 numpy                         # Numerical computations
