@@ -1,10 +1,16 @@
-# Python
+# ==============================================================================
+# Git Ignore Configuration for QuantPilot
+# ==============================================================================
+
+# Python Environments & Artifacts
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 env/
+venv/
+backend/venv/
 build/
 develop-eggs/
 dist/
@@ -22,17 +28,25 @@ wheels/
 *.egg
 venv/
 .env
-.env.example
 chatbot.db*
 
-# Node
+# Node / Frontend Build Outputs
 node_modules/
+frontend/node_modules/
 dist/
+frontend/dist/
 dist-ssr/
 *.local
+
+# IDE & Operating System Files
 .vscode/
 .idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 .DS_Store
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+Thumbs.db
+
+OPTIMIZATIONS.md

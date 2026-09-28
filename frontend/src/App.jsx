@@ -19,19 +19,12 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeView, setActiveView] = useState('chat')
+  const [selectedTradeSymbol, setSelectedTradeSymbol] = useState('')
   const chatEndRef = useRef(null)
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
-
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
-
-  useEffect(() => {
-    fetchThreads()
-  }, [])
 
   const fetchThreads = async () => {
     try {
@@ -41,6 +34,26 @@ export default function App() {
       console.error("Failed to fetch threads", err)
     }
   }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  useEffect(() => {
+    let isMounted = true
+    const loadInitialThreads = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/threads`)
+        if (isMounted) setThreads(res.data)
+      } catch (err) {
+        console.error("Failed to fetch initial threads", err)
+      }
+    }
+    loadInitialThreads()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const handleSelectThread = async (id) => {
     setActiveThreadId(id)
@@ -168,7 +181,7 @@ export default function App() {
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           {activeView === 'trading' ? (
             <div className="trading-view-container">
-              <TradingPanel />
+              <TradingPanel initialSymbol={selectedTradeSymbol} />
             </div>
           ) : (
             <div className="chat-view">
@@ -216,7 +229,10 @@ export default function App() {
                         <div style={{ marginTop: '24px' }}>
                           <StockCard 
                             symbol={msg.content.split("DASHBOARD:")[1].trim().split(" ")[0].split("\n")[0]}
-                            onTrade={(symbol) => setActiveView('trading')}
+                            onTrade={(symbol) => {
+                              setSelectedTradeSymbol(symbol);
+                              setActiveView('trading');
+                            }}
                           />
                         </div>
                       )}

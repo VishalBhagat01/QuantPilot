@@ -20,17 +20,23 @@ import './TradingPanel.css';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-export default function TradingPanel() {
+export default function TradingPanel({ initialSymbol = '' }) {
 
   const [account, setAccount]     = useState(null);
   const [positions, setPositions] = useState([]);
   const [orders, setOrders]       = useState([]);
-  const [scanSymbol, setScanSymbol] = useState('');
+  const [scanSymbol, setScanSymbol] = useState(initialSymbol);
   const [scanResult, setScanResult] = useState(null);
   const [scanning, setScanning]   = useState(false);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
   const [activeTab, setActiveTab] = useState('scanner');
+
+  useEffect(() => {
+    if (initialSymbol) {
+      setScanSymbol(initialSymbol);
+    }
+  }, [initialSymbol]);
 
   useEffect(() => {
     fetchTradingData();

@@ -4,9 +4,8 @@
 langchain-core
 langchain
 langchain-community
-langchain-google-genai        # Gemini 2.5 Flash (Analyst + Reviewer)
-langchain-groq                # Groq LLM (Llama 3.3, Kimi K2)
-langchain-huggingface
+langchain-google-genai        # Google Gemini 2.5 Flash
+langchain-groq                # Groq LLM (Llama 3.3)
 
 # =============================================
 # LangGraph (Multi-Agent Orchestration)
@@ -15,42 +14,41 @@ langgraph
 langgraph-checkpoint-postgres
 
 # =============================================
-# Vector DB / Embeddings
-# =============================================
-faiss-cpu
-sentence-transformers
-
-# =============================================
-# Database (PostgreSQL)
+# Database (PostgreSQL / Supabase)
 # =============================================
 psycopg[binary,pool]
 
 # =============================================
-# Backend / API
+# Backend / API Web Server
 # =============================================
 fastapi
 uvicorn
 pydantic
 
 # =============================================
-# Utilities
+# Utilities & HTTP
 # =============================================
 python-dotenv
 duckduckgo-search
 requests
 
 # =============================================
-# Technical Analysis
+# Data Science & Technical Analysis
 # =============================================
-pandas                        # Data processing and technical indicators
+pandas                        # Dataframes and indicator calculations
 numpy                         # Numerical computations
-matplotlib                    # Required by mplfinance
-Pillow                        # Image handling utilities
-yfinance                      # Fetches OHLCV price data from Yahoo Finance
+matplotlib                    # Chart rendering
+mplfinance                    # Candlestick financial charting
+Pillow                        # Image processing
+yfinance                      # Real-time and historical OHLCV data
+
+# =============================================
+# Chart Pattern Detection (Computer Vision)
+# =============================================
+ultralytics                   # YOLOv8 object detection engine
+huggingface-hub               # Download pattern model weights
 
 # =============================================
 # Alpaca Broker Integration
 # =============================================
-# Connects to Alpaca Markets API for trade execution (buy/sell stocks)
-# Default: paper trading (sandbox, no real money at risk)
-alpaca-py                     # Official Alpaca Markets Python SDK
+alpaca-py                     # Alpaca Markets SDK for algorithmic trading
