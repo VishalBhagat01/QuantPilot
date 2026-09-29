@@ -57,6 +57,14 @@ class Settings:
         default_factory=lambda: os.getenv("DATABASE_URL", "").strip()
     )
 
+    # LLM Configuration
+    llm_provider: str = field(
+        default_factory=lambda: os.getenv("LLM_PROVIDER", "google").strip().lower()
+    )
+    llm_model_name: str = field(
+        default_factory=lambda: os.getenv("LLM_MODEL_NAME", "gemini-flash-latest").strip()
+    )
+
     # LLM API Keys
     google_api_key: str = field(
         default_factory=lambda: os.getenv("GOOGLE_API_KEY", "").strip()

@@ -76,38 +76,54 @@ class StockAnalysisResponse(BaseModel):
 
 google_key = settings.google_api_key
 groq_key = settings.groq_api_key
+llm_provider = settings.llm_provider
+llm_model_name = settings.llm_model_name
 
 primary_llm = None
 backup_llm = None
 
+# Initialize Google LLM
+g_google = None
 if google_key:
     try:
-        primary_llm = ChatGoogleGenerativeAI(
-            model="gemini-flash-latest",
+        model = llm_model_name if llm_provider == "google" and llm_model_name else "gemini-flash-latest"
+        g_google = ChatGoogleGenerativeAI(
+            model=model,
             temperature=0.1,
             google_api_key=google_key
         )
-        logger.info("[AGENT] Using Google Gemini (gemini-flash-latest) as primary LLM.")
     except Exception as e:
         logger.error(f"[AGENT] Google Gemini initialization error: {e}")
 
+# Initialize Groq LLM
+g_groq = None
 if groq_key:
     try:
-        g_llm = ChatGroq(
-            model="openai/gpt-oss-120b",
+        model = llm_model_name if llm_provider == "groq" and llm_model_name else "llama-3.3-70b-versatile"
+        g_groq = ChatGroq(
+            model=model,
             temperature=0,
             groq_api_key=groq_key
         )
-        if primary_llm is None:
-            primary_llm = g_llm
-            logger.info("[AGENT] Using Groq as primary LLM.")
-        else:
-            backup_llm = g_llm
     except Exception as e:
         logger.error(f"[AGENT] Groq initialization error: {e}")
 
+# Assign Primary and Backup based on preferred provider
+if llm_provider == "groq" and g_groq:
+    primary_llm = g_groq
+    backup_llm = g_google
+    logger.info(f"[AGENT] Using Groq ({g_groq.model_name}) as primary LLM.")
+elif g_google:
+    primary_llm = g_google
+    backup_llm = g_groq
+    logger.info(f"[AGENT] Using Google Gemini ({g_google.model}) as primary LLM.")
+elif g_groq:
+    primary_llm = g_groq
+    backup_llm = None
+    logger.info(f"[AGENT] Using Groq ({g_groq.model_name}) as primary LLM (fallback).")
+
 if primary_llm is None:
-    raise RuntimeError("No LLM configured! Please provide a valid GOOGLE_API_KEY in backend/.env")
+    raise RuntimeError("No LLM configured! Please provide a valid GOOGLE_API_KEY or GROQ_API_KEY in backend/.env")
 
 tools_list = [
     get_stock_price,
