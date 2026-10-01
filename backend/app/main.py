@@ -14,7 +14,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import psycopg
@@ -26,6 +26,7 @@ from backend.agents.stock_agent import graph
 from backend.db.db import get_db, release_db, init_db, check_db_availability
 from backend.ingestion.tool import fetch_stock_dashboard_data, predict_stock_signal
 from backend.trading.broker import get_account_info, get_positions, get_recent_orders
+from backend.app.auth import verify_user
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ def filter_messages(messages):
 
 
 @app.get("/threads")
-def get_threads():
+def get_threads(user=Depends(verify_user)):
     """Retrieve all conversations, ordered by latest activity."""
     try:
         conn = get_db()
@@ -155,7 +156,7 @@ def get_threads():
 
 
 @app.get("/threads/{thread_id}")
-def get_thread_history(thread_id: str):
+def get_thread_history(thread_id: str, user=Depends(verify_user)):
     """Retrieve message history for a specific thread."""
     try:
         config = {"configurable": {"thread_id": thread_id}}
@@ -168,7 +169,7 @@ def get_thread_history(thread_id: str):
 
 
 @app.delete("/threads/{thread_id}")
-def delete_thread(thread_id: str):
+def delete_thread(thread_id: str, user=Depends(verify_user)):
     """Delete a thread and associated checkpoints."""
     _memory_threads.pop(thread_id, None)
     try:
@@ -192,7 +193,7 @@ def delete_thread(thread_id: str):
 # ---------------------------------------------------------------------------
 
 @app.post("/analyze")
-def analyze_stock(req: StockRequest):
+def analyze_stock(req: StockRequest, user=Depends(verify_user)):
     """Analyze query via LangGraph multi-agent orchestration."""
     thread_id = req.thread_id or str(uuid.uuid4())
     logger.info(f"[BACKEND] Query: {req.query} (thread: {thread_id})")
@@ -250,7 +251,7 @@ def analyze_stock(req: StockRequest):
 
 
 @app.post("/agent/stock")
-def get_dashboard_data(req: Dict[str, str]):
+def get_dashboard_data(req: Dict[str, str], user=Depends(verify_user)):
     """Directly fetch consolidated data for the StockCard UI widget."""
     symbol = req.get("symbol", "").strip().upper()
     if not symbol:
@@ -268,7 +269,7 @@ def get_dashboard_data(req: Dict[str, str]):
 # ---------------------------------------------------------------------------
 
 @app.get("/trading/account")
-def get_trading_account():
+def get_trading_account(user=Depends(verify_user)):
     """Return Alpaca trading account details."""
     try:
         return get_account_info()
@@ -278,7 +279,7 @@ def get_trading_account():
 
 
 @app.get("/trading/positions")
-def get_trading_positions():
+def get_trading_positions(user=Depends(verify_user)):
     """Return all open Alpaca positions."""
     try:
         return get_positions()
@@ -288,7 +289,7 @@ def get_trading_positions():
 
 
 @app.post("/trading/scan/{symbol}")
-def scan_chart_patterns(symbol: str):
+def scan_chart_patterns(symbol: str, user=Depends(verify_user)):
     """
     Run technical analysis and chart pattern scan for a stock.
     Returns signal, confidence, indicators, and detected patterns.
@@ -331,7 +332,7 @@ def scan_chart_patterns(symbol: str):
 
 
 @app.get("/trading/orders")
-def get_trading_orders():
+def get_trading_orders(user=Depends(verify_user)):
     """Return recent Alpaca orders."""
     try:
         return get_recent_orders(limit=10)

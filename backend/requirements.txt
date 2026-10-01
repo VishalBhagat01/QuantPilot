@@ -17,6 +17,7 @@ langgraph-checkpoint-postgres
 # Database (PostgreSQL / Supabase)
 # =============================================
 psycopg[binary,pool]
+supabase
 
 # =============================================
 # Backend / API Web Server
