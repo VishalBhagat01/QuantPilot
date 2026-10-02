@@ -78,25 +78,26 @@ class StockRequest(BaseModel):
 # Thread & Session Management
 # ---------------------------------------------------------------------------
 
-def _upsert_thread(thread_id: str, query: str):
+def _upsert_thread(thread_id: str, query: str, user_id: str):
     """Create or update thread metadata (Postgres with in-memory fallback)."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     title = query[:50] + ("..." if len(query) > 50 else "")
 
     if thread_id not in _memory_threads:
-        _memory_threads[thread_id] = {"title": title, "updated_at": now}
+        _memory_threads[thread_id] = {"title": title, "updated_at": now, "user_id": user_id}
     else:
         _memory_threads[thread_id]["updated_at"] = now
+        _memory_threads[thread_id]["user_id"] = user_id
 
     try:
         conn = get_db()
         try:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO threads (id, title, updated_at)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP;
-                """, (thread_id, title))
+                    INSERT INTO threads (id, title, user_id, updated_at)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP, user_id = EXCLUDED.user_id;
+                """, (thread_id, title, user_id))
                 conn.commit()
         finally:
             release_db(conn)
@@ -138,18 +139,19 @@ def filter_messages(messages):
 
 @app.get("/threads")
 def get_threads(user=Depends(verify_user)):
-    """Retrieve all conversations, ordered by latest activity."""
+    """Retrieve all conversations for the user, ordered by latest activity."""
+    user_id = user.id if hasattr(user, "id") else user.get("id")
     try:
         conn = get_db()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, title, updated_at FROM threads ORDER BY updated_at DESC")
+                cur.execute("SELECT id, title, updated_at FROM threads WHERE user_id = %s ORDER BY updated_at DESC", (user_id,))
                 return cur.fetchall()
         finally:
             release_db(conn)
     except Exception:
         return sorted(
-            [{"id": k, "title": v["title"], "updated_at": v["updated_at"]} for k, v in _memory_threads.items()],
+            [{"id": k, "title": v["title"], "updated_at": v["updated_at"]} for k, v in _memory_threads.items() if v.get("user_id") == user_id],
             key=lambda x: str(x["updated_at"]),
             reverse=True
         )
@@ -157,7 +159,27 @@ def get_threads(user=Depends(verify_user)):
 
 @app.get("/threads/{thread_id}")
 def get_thread_history(thread_id: str, user=Depends(verify_user)):
-    """Retrieve message history for a specific thread."""
+    """Retrieve message history for a specific thread, ensuring ownership."""
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+    try:
+        if check_db_availability():
+            conn = get_db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM threads WHERE id = %s AND user_id = %s", (thread_id, user_id))
+                    if not cur.fetchone():
+                        raise HTTPException(status_code=403, detail="Access denied")
+            finally:
+                release_db(conn)
+        else:
+            mem_thread = _memory_threads.get(thread_id)
+            if mem_thread and mem_thread.get("user_id") != user_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+    except HTTPException:
+        raise
+    except Exception:
+        pass # Ignore DB errors during auth check
+        
     try:
         config = {"configurable": {"thread_id": thread_id}}
         state = graph.get_state(config)
@@ -171,11 +193,22 @@ def get_thread_history(thread_id: str, user=Depends(verify_user)):
 @app.delete("/threads/{thread_id}")
 def delete_thread(thread_id: str, user=Depends(verify_user)):
     """Delete a thread and associated checkpoints."""
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+    
+    # Check memory first
+    mem_thread = _memory_threads.get(thread_id)
+    if mem_thread and mem_thread.get("user_id") != user_id:
+         raise HTTPException(status_code=403, detail="Access denied")
     _memory_threads.pop(thread_id, None)
+
     try:
         conn = get_db()
         try:
             with conn.cursor() as cur:
+                cur.execute("SELECT id FROM threads WHERE id = %s AND user_id = %s", (thread_id, user_id))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=403, detail="Access denied")
+                
                 cur.execute("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,))
                 cur.execute("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (thread_id,))
                 cur.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,))
@@ -183,6 +216,8 @@ def delete_thread(thread_id: str, user=Depends(verify_user)):
                 conn.commit()
         finally:
             release_db(conn)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"[THREADS] DB delete skipped: {e}")
     return {"status": "success"}
@@ -195,10 +230,34 @@ def delete_thread(thread_id: str, user=Depends(verify_user)):
 @app.post("/analyze")
 def analyze_stock(req: StockRequest, user=Depends(verify_user)):
     """Analyze query via LangGraph multi-agent orchestration."""
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+    
+    # Verify thread ownership if thread_id is provided
+    if req.thread_id:
+        try:
+            if check_db_availability():
+                conn = get_db()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT user_id FROM threads WHERE id = %s", (req.thread_id,))
+                        row = cur.fetchone()
+                        if row and row["user_id"] != user_id:
+                            raise HTTPException(status_code=403, detail="Cannot use another user's thread")
+                finally:
+                    release_db(conn)
+            else:
+                mem_thread = _memory_threads.get(req.thread_id)
+                if mem_thread and mem_thread.get("user_id") != user_id:
+                    raise HTTPException(status_code=403, detail="Cannot use another user's thread")
+        except HTTPException:
+            raise
+        except Exception:
+            pass # Ignore DB errors during auth check
+            
     thread_id = req.thread_id or str(uuid.uuid4())
-    logger.info(f"[BACKEND] Query: {req.query} (thread: {thread_id})")
+    logger.info(f"[BACKEND] Query: {req.query} (thread: {thread_id}, user: {user_id})")
 
-    _upsert_thread(thread_id, req.query)
+    _upsert_thread(thread_id, req.query, user_id)
 
     # Fast-path for greetings to provide instantaneous response
     clean_q = req.query.strip().lower().rstrip("!?.")
