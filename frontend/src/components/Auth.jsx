@@ -21,18 +21,18 @@ export default function Auth() {
 
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-[var(--bg-base)] text-[var(--text-primary)]">
-      <div className="p-8 bg-[var(--bg-surface-elevated)] rounded-2xl border border-[var(--border-subtle)] shadow-xl w-full max-w-md text-center">
-        <h1 className="text-2xl font-bold mb-6">
+      <div className="p-10 bg-[var(--bg-surface-elevated)] rounded-[24px] border-2 border-[var(--border-subtle)] shadow-[var(--shadow-card)] w-full max-w-md text-center">
+        <h1 className="font-display text-3xl font-black uppercase tracking-tight mb-4">
           {isLogin ? 'Welcome Back' : 'Create an Account'}
         </h1>
-        <p className="text-sm text-[var(--text-secondary)] mb-8">
+        <p className="font-mono text-sm text-[var(--text-secondary)] mb-8">
           Sign in to access QuantPilot AI.
         </p>
 
         <button
           onClick={handleGoogleLogin}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-3 bg-white text-gray-800 font-bold py-3 px-4 rounded-xl shadow-md hover:bg-gray-50 transition-colors border border-gray-200 cursor-pointer"
+          className="w-full flex items-center justify-center gap-3 bg-[var(--bg-surface)] text-[var(--text-primary)] font-mono font-bold uppercase tracking-wider py-3.5 px-4 rounded-xl shadow-[var(--shadow-sm)] hover:bg-[var(--bg-surface-hover)] transition-colors border-2 border-[var(--border-subtle)] cursor-pointer"
         >
           <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-5 h-5" />
           {loading ? 'Redirecting...' : 'Continue with Google'}

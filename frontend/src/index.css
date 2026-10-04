@@ -1,43 +1,47 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 @theme {
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Playfair Display', serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  --color-quant-orange: #ff6600;
-  --color-quant-orange-hover: #ea580c;
+  --color-quant-orange: #FF6B4A;
+  --color-quant-orange-hover: #ff5530;
+  --color-quant-yellow: #FFE043;
   --color-quant-emerald: #10b981;
   --color-quant-crimson: #ef4444;
   --color-quant-indigo: #6366f1;
   --color-quant-cyan: #06b6d4;
 
-  --color-yc-orange: #ff6600;
-  --color-primary-500: #ff6600;
-  --color-primary-600: #ea580c;
+  --color-yc-orange: #FF6B4A;
+  --color-primary-500: #FF6B4A;
+  --color-primary-600: #ff5530;
 }
 
 @layer base {
   :root {
-    --bg-base: #f8fafc;
-    --bg-surface: #ffffff;
-    --bg-surface-elevated: #f1f5f9;
-    --bg-surface-hover: #e2e8f0;
-    --bg-surface-glass: rgba(255, 255, 255, 0.85);
+    --bg-base: #FAF6E8;
+    --bg-surface: #FFFFFF;
+    --bg-surface-elevated: #FFFDF0;
+    --bg-surface-hover: #f4f0e1;
+    --bg-surface-glass: rgba(250, 246, 232, 0.95);
 
-    --border-subtle: #e2e8f0;
-    --border-hover: #cbd5e1;
-    --border-accent: rgba(255, 102, 0, 0.35);
+    --border-subtle: #161618;
+    --border-hover: #161618;
+    --border-accent: #FF6B4A;
 
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --text-tertiary: #94a3b8;
+    --text-primary: #161618;
+    --text-secondary: #52525B;
+    --text-tertiary: #71717A;
 
-    --glow-primary: rgba(255, 102, 0, 0.12);
-    --glow-bullish: rgba(16, 185, 129, 0.15);
-    --glow-bearish: rgba(239, 68, 68, 0.15);
+    --glow-primary: transparent;
+    --glow-bullish: transparent;
+    --glow-bearish: transparent;
 
-    --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
-    --shadow-elevated: 0 12px 32px -4px rgba(15, 23, 42, 0.1), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+    --shadow-card: 4px 4px 0px #161618;
+    --shadow-elevated: 6px 6px 0px #161618;
+    --shadow-sm: 2px 2px 0px #161618;
 
     /* Legacy mapping */
     --bg-primary: var(--bg-surface);
@@ -46,26 +50,27 @@
   }
 
   .dark {
-    --bg-base: #090b10;
-    --bg-surface: #0f131c;
-    --bg-surface-elevated: #161c28;
-    --bg-surface-hover: #1e2636;
-    --bg-surface-glass: rgba(15, 19, 28, 0.78);
+    --bg-base: #0a0a0a;
+    --bg-surface: #121212;
+    --bg-surface-elevated: #1a1a1a;
+    --bg-surface-hover: #222222;
+    --bg-surface-glass: rgba(10, 10, 10, 0.95);
 
-    --border-subtle: #1e2636;
-    --border-hover: #2e384d;
-    --border-accent: rgba(255, 102, 0, 0.4);
+    --border-subtle: #333333;
+    --border-hover: #555555;
+    --border-accent: #FF6B4A;
 
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-tertiary: #64748b;
+    --text-primary: #ffffff;
+    --text-secondary: #a1a1aa;
+    --text-tertiary: #71717A;
 
-    --glow-primary: rgba(255, 102, 0, 0.2);
-    --glow-bullish: rgba(16, 185, 129, 0.2);
-    --glow-bearish: rgba(239, 68, 68, 0.2);
+    --glow-primary: transparent;
+    --glow-bullish: transparent;
+    --glow-bearish: transparent;
 
-    --shadow-card: 0 4px 24px -2px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
-    --shadow-elevated: 0 16px 40px -4px rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
+    --shadow-card: 4px 4px 0px #2a2a2a;
+    --shadow-elevated: 6px 6px 0px #2a2a2a;
+    --shadow-sm: 2px 2px 0px #2a2a2a;
 
     /* Legacy mapping */
     --bg-primary: var(--bg-surface);
