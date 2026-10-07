@@ -99,6 +99,11 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_threads_updated_at ON threads (updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_threads_user_id ON threads (user_id);
+
+                CREATE TABLE IF NOT EXISTS terms_acceptance (
+                    user_id TEXT PRIMARY KEY,
+                    accepted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
             """)
             conn.commit()
             

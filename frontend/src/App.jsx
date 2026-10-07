@@ -1,8 +1,18 @@
 import { useState, useRef, useEffect } from "react"
 import axios from "axios"
 import ReactMarkdown from 'react-markdown'
-import { supabase } from './supabaseClient'
 import Auth from './components/Auth'
+import TermsGate from './components/TermsGate'
+import { 
+  initializeAuth, 
+  exchangeCodeForSession, 
+  signOut, 
+  getStoredTokens, 
+  clearSession,
+  checkTermsAccepted,
+  acceptTerms,
+  getStoredUser
+} from './authApi'
 import { 
   Send, 
   Bot, 
@@ -34,7 +44,9 @@ import TradingPanel from "./components/TradingPanel"
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
 export default function App() {
-  const [session, setSession] = useState(null)
+  const [user, setUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [termsAccepted, setTermsAccepted] = useState(false)
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState([
     { 
@@ -58,28 +70,48 @@ export default function App() {
   const chatEndRef = useRef(null)
   const inputRef = useRef(null)
 
+  // ── Initialize Auth from Backend ──
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session) {
-        axios.defaults.headers.common['Authorization'] = `Bearer ${session.access_token}`;
+    const init = async () => {
+      // Check if this is an OAuth callback (URL has ?code= parameter)
+      const params = new URLSearchParams(window.location.search)
+      const code = params.get('code')
+      
+      if (code) {
+        try {
+          const session = await exchangeCodeForSession(code)
+          setUser(session.user)
+          // Check if terms were accepted already
+          const accepted = await checkTermsAccepted()
+          setTermsAccepted(accepted)
+          // Clean the URL
+          window.history.replaceState({}, document.title, window.location.pathname)
+        } catch (err) {
+          console.error("OAuth callback failed:", err)
+          clearSession()
+        }
+        setAuthLoading(false)
+        return
       }
-    })
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      if (session) {
-        axios.defaults.headers.common['Authorization'] = `Bearer ${session.access_token}`;
-      } else {
-        delete axios.defaults.headers.common['Authorization'];
+      // Normal init: check for stored session
+      try {
+        const { user: existingUser, termsAccepted: accepted } = await initializeAuth()
+        if (existingUser) {
+          setUser(existingUser)
+          setTermsAccepted(accepted)
+        }
+      } catch (err) {
+        console.error("Auth init failed:", err)
+        clearSession()
       }
-    })
+      setAuthLoading(false)
+    }
 
-    return () => subscription.unsubscribe()
+    init()
   }, [])
 
+  // ── Theme Management ──
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.remove('light')
@@ -110,7 +142,7 @@ export default function App() {
   }, [messages])
 
   useEffect(() => {
-    if (session) {
+    if (user && termsAccepted) {
       fetchThreads()
     } else {
       setThreads([])
@@ -122,7 +154,7 @@ export default function App() {
         }
       ])
     }
-  }, [session])
+  }, [user, termsAccepted])
 
   const handleSelectThread = async (id) => {
     setActiveThreadId(id)
@@ -207,10 +239,47 @@ export default function App() {
     setTimeout(() => setCopiedIdx(null), 2000)
   }
 
+  const handleSignOut = async () => {
+    await signOut()
+    setUser(null)
+    setTermsAccepted(false)
+  }
+
+  const handleTermsAccepted = async () => {
+    try {
+      await acceptTerms()
+      setTermsAccepted(true)
+    } catch (err) {
+      console.error("Failed to accept terms:", err)
+    }
+  }
+
   const isWelcomeState = messages.length <= 1 && !loading
 
-  if (!session) {
+  // ── Auth Loading ──
+  if (authLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-[var(--bg-base)] text-[var(--text-primary)]">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)]">
+            <Terminal size={20} className="text-white" />
+          </div>
+          <span className="font-display text-2xl font-black tracking-tight">quantpilot</span>
+        </div>
+        <Loader2 size={24} className="animate-spin text-[var(--color-quant-orange)]" />
+        <p className="mt-3 font-mono text-xs text-[var(--text-tertiary)]">Initializing session...</p>
+      </div>
+    )
+  }
+
+  // ── Show Login if No User ──
+  if (!user) {
     return <Auth />
+  }
+
+  // ── Show Terms Gate if Terms Not Accepted ──
+  if (!termsAccepted) {
+    return <TermsGate onAccept={handleTermsAccepted} onDecline={handleSignOut} />
   }
 
   return (
@@ -308,7 +377,7 @@ export default function App() {
             </button>
             <button
               className="px-4 py-1.5 h-9 rounded-full bg-[var(--color-quant-orange)] text-white hover:bg-orange-600 border-2 border-[var(--border-subtle)] shadow-[var(--shadow-sm)] transition-colors hidden sm:flex cursor-pointer items-center ml-2"
-              onClick={() => supabase.auth.signOut()}
+              onClick={handleSignOut}
               title="Sign Out"
               aria-label="Sign Out"
             >

@@ -27,6 +27,7 @@ from backend.db.db import get_db, release_db, init_db, check_db_availability
 from backend.ingestion.tool import fetch_stock_dashboard_data, predict_stock_signal
 from backend.trading.broker import get_account_info, get_positions, get_recent_orders
 from backend.app.auth import verify_user
+from backend.app.auth_router import router as auth_router
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register distributed routers
+app.include_router(auth_router)
 
 
 class StockRequest(BaseModel):
