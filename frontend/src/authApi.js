@@ -1,15 +1,15 @@
 /**
- * authApi.js — Thin API client for all authentication operations.
+ * authApi.js — Auth client with backend-first architecture.
  * 
- * All core auth logic lives on the backend. The frontend only:
- *   1. Calls backend endpoints
- *   2. Stores tokens in localStorage
- *   3. Sets axios Authorization header
- * 
- * No Supabase SDK is used for authentication.
+ * Architecture:
+ *   - OAuth redirect flow uses Supabase client-side (PKCE requires browser-side code_verifier)
+ *   - After session is obtained, tokens are stored locally and sent to backend
+ *   - ALL subsequent auth operations (verify, refresh, signout, T&C) go through backend
+ *   - Session validation is always server-side via GET /auth/me
  */
 
 import axios from "axios";
+import { supabase } from "./supabaseClient";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -37,11 +37,13 @@ export function getStoredUser() {
   }
 }
 
-export function storeSession(data) {
-  localStorage.setItem(TOKEN_KEY, data.access_token);
-  localStorage.setItem(REFRESH_KEY, data.refresh_token);
-  localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-  axios.defaults.headers.common["Authorization"] = `Bearer ${data.access_token}`;
+export function storeSession({ access_token, refresh_token, user }) {
+  if (access_token) localStorage.setItem(TOKEN_KEY, access_token);
+  if (refresh_token) localStorage.setItem(REFRESH_KEY, refresh_token);
+  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+  if (access_token) {
+    axios.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
+  }
 }
 
 export function clearSession() {
@@ -52,36 +54,81 @@ export function clearSession() {
 }
 
 // ---------------------------------------------------------------------------
-// Auth API Calls (all hit the backend)
+// OAuth Flow (Supabase client-side — required for PKCE)
 // ---------------------------------------------------------------------------
 
-/** Get the Google OAuth redirect URL from the backend */
-export async function getGoogleOAuthUrl() {
-  const res = await axios.get(`${API_BASE}/auth/google/url`);
-  return res.data.url;
-}
-
-/** Exchange the OAuth code for a session (called after redirect) */
-export async function exchangeCodeForSession(code) {
-  const res = await axios.post(`${API_BASE}/auth/callback`, { code });
-  storeSession(res.data);
-  return res.data;
-}
-
-/** Refresh the access token using the stored refresh token */
-export async function refreshAccessToken() {
-  const { refreshToken } = getStoredTokens();
-  if (!refreshToken) throw new Error("No refresh token available");
-
-  const res = await axios.post(`${API_BASE}/auth/refresh`, {
-    refresh_token: refreshToken,
+/**
+ * Start the Google OAuth flow via Supabase client-side SDK.
+ * This is the one operation that MUST happen client-side because
+ * Supabase PKCE stores the code_verifier in the browser.
+ */
+export async function startGoogleOAuth() {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
   });
-  storeSession(res.data);
-  return res.data;
+  if (error) throw error;
 }
 
-/** Get current user info from backend (validates token server-side) */
-export async function getCurrentUser() {
+/**
+ * Listen for auth state changes from Supabase (e.g. after OAuth redirect).
+ * When a session is detected, capture tokens and store them.
+ * Returns an unsubscribe function.
+ */
+export function onAuthStateChange(callback) {
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (session) {
+      const userData = {
+        id: session.user.id,
+        email: session.user.email,
+        name: session.user.user_metadata?.full_name || "",
+        avatar_url: session.user.user_metadata?.avatar_url || "",
+      };
+      storeSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        user: userData,
+      });
+      callback(userData, session);
+    } else {
+      clearSession();
+      callback(null, null);
+    }
+  });
+
+  return () => subscription.unsubscribe();
+}
+
+/**
+ * Check for an existing Supabase session on app load.
+ * If found, capture the tokens and return the user.
+ */
+export async function getExistingSession() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    const userData = {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.user_metadata?.full_name || "",
+      avatar_url: session.user.user_metadata?.avatar_url || "",
+    };
+    storeSession({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      user: userData,
+    });
+    return { user: userData, session };
+  }
+  return { user: null, session: null };
+}
+
+// ---------------------------------------------------------------------------
+// Backend-driven Auth Operations
+// ---------------------------------------------------------------------------
+
+/** Validate the current token server-side via GET /auth/me */
+export async function validateSession() {
   const { accessToken } = getStoredTokens();
   if (!accessToken) return null;
 
@@ -91,23 +138,30 @@ export async function getCurrentUser() {
     const res = await axios.get(`${API_BASE}/auth/me`);
     return res.data;
   } catch (err) {
-    // If 401, try refreshing
     if (err.response?.status === 401) {
+      // Try refreshing via Supabase
       try {
-        await refreshAccessToken();
-        const res = await axios.get(`${API_BASE}/auth/me`);
-        return res.data;
+        const { data: { session } } = await supabase.auth.refreshSession();
+        if (session) {
+          storeSession({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+            user: getStoredUser(),
+          });
+          const res = await axios.get(`${API_BASE}/auth/me`);
+          return res.data;
+        }
       } catch {
-        clearSession();
-        return null;
+        // Refresh failed
       }
+      clearSession();
+      return null;
     }
-    clearSession();
     return null;
   }
 }
 
-/** Sign out through the backend */
+/** Sign out — revoke on backend AND clear Supabase session */
 export async function signOut() {
   const { accessToken } = getStoredTokens();
   try {
@@ -117,13 +171,14 @@ export async function signOut() {
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
   } catch {
-    // Sign out locally even if backend call fails
+    // Backend signout failed, still clear locally
   }
+  await supabase.auth.signOut();
   clearSession();
 }
 
 // ---------------------------------------------------------------------------
-// Terms & Conditions API
+// Terms & Conditions API (all backend)
 // ---------------------------------------------------------------------------
 
 /** Check if the current user has accepted T&C */
@@ -149,16 +204,19 @@ export async function getTermsContent() {
 }
 
 // ---------------------------------------------------------------------------
-// Initialize Session on App Load
+// Initialize Auth on App Load
 // ---------------------------------------------------------------------------
 
 export async function initializeAuth() {
-  const { accessToken } = getStoredTokens();
-  if (!accessToken) return { user: null, termsAccepted: false };
-
-  const user = await getCurrentUser();
+  // 1. Check for existing Supabase session (handles OAuth callback automatically)
+  const { user } = await getExistingSession();
   if (!user) return { user: null, termsAccepted: false };
 
+  // 2. Validate the token server-side
+  const validatedUser = await validateSession();
+  if (!validatedUser) return { user: null, termsAccepted: false };
+
+  // 3. Check T&C acceptance via backend
   const termsAccepted = await checkTermsAccepted();
-  return { user, termsAccepted };
+  return { user: validatedUser, termsAccepted };
 }

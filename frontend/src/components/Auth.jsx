@@ -1,17 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, ChevronDown, Loader2, Terminal, ExternalLink, ArrowRight } from 'lucide-react';
-import { getGoogleOAuthUrl, getTermsContent } from '../authApi';
+import { ShieldCheck, ChevronDown, Loader2, Terminal, ArrowRight } from 'lucide-react';
+import { startGoogleOAuth, getTermsContent } from '../authApi';
 
 /**
  * Auth Component — Login screen with Terms & Conditions gate.
  *
- * The entire OAuth flow is backend-driven:
- *   1. Frontend calls GET /auth/google/url → gets redirect URL
- *   2. Browser redirects to Google
- *   3. Google redirects back to /auth/callback with a code
- *   4. App.jsx handles the callback, exchanges code via backend
- *
- * User must accept T&C before they can proceed to login.
+ * OAuth flow:
+ *   1. User accepts T&C
+ *   2. Clicks "Continue with Google"
+ *   3. Supabase PKCE flow starts (client-side — required for code_verifier)
+ *   4. Google redirects back → Supabase detects session → App.jsx captures it
+ *   5. Backend validates token + records T&C acceptance
  */
 export default function Auth() {
   const [loading, setLoading] = useState(false);
@@ -49,11 +48,10 @@ export default function Auth() {
 
     try {
       setLoading(true);
-      const url = await getGoogleOAuthUrl();
-      // Redirect browser to Google OAuth (backend-generated URL)
-      window.location.href = url;
+      // Uses Supabase client-side SDK for PKCE OAuth (backend validates after)
+      await startGoogleOAuth();
     } catch (error) {
-      alert(error.response?.data?.detail || error.message || 'Failed to start login');
+      alert(error.error_description || error.message || 'Failed to start login');
       setLoading(false);
     }
   };
@@ -163,13 +161,13 @@ export default function Auth() {
         {/* Divider */}
         <div className="mt-8 flex items-center gap-3">
           <span className="flex-1 border-b border-[var(--border-subtle)]" />
-          <span className="text-[10px] font-mono text-[var(--text-tertiary)] uppercase tracking-widest">Secured by backend</span>
+          <span className="text-[10px] font-mono text-[var(--text-tertiary)] uppercase tracking-widest">Secured</span>
           <span className="flex-1 border-b border-[var(--border-subtle)]" />
         </div>
 
         <div className="mt-4 flex items-center justify-center gap-2 text-[10px] font-mono text-[var(--text-tertiary)]">
           <ShieldCheck size={12} className="text-emerald-500" />
-          <span>All auth logic processed server-side</span>
+          <span>Session validated server-side · T&C enforced by backend</span>
         </div>
       </div>
 

@@ -5,7 +5,7 @@ import Auth from './components/Auth'
 import TermsGate from './components/TermsGate'
 import { 
   initializeAuth, 
-  exchangeCodeForSession, 
+  onAuthStateChange, 
   signOut, 
   getStoredTokens, 
   clearSession,
@@ -73,28 +73,6 @@ export default function App() {
   // ── Initialize Auth from Backend ──
   useEffect(() => {
     const init = async () => {
-      // Check if this is an OAuth callback (URL has ?code= parameter)
-      const params = new URLSearchParams(window.location.search)
-      const code = params.get('code')
-      
-      if (code) {
-        try {
-          const session = await exchangeCodeForSession(code)
-          setUser(session.user)
-          // Check if terms were accepted already
-          const accepted = await checkTermsAccepted()
-          setTermsAccepted(accepted)
-          // Clean the URL
-          window.history.replaceState({}, document.title, window.location.pathname)
-        } catch (err) {
-          console.error("OAuth callback failed:", err)
-          clearSession()
-        }
-        setAuthLoading(false)
-        return
-      }
-
-      // Normal init: check for stored session
       try {
         const { user: existingUser, termsAccepted: accepted } = await initializeAuth()
         if (existingUser) {
@@ -109,6 +87,21 @@ export default function App() {
     }
 
     init()
+
+    // Listen for OAuth redirects handled by Supabase SDK
+    const unsubscribe = onAuthStateChange(async (userData, session) => {
+      if (userData) {
+        setUser(userData)
+        const accepted = await checkTermsAccepted()
+        setTermsAccepted(accepted)
+        setAuthLoading(false)
+      } else {
+        setUser(null)
+        setTermsAccepted(false)
+      }
+    })
+
+    return () => unsubscribe()
   }, [])
 
   // ── Theme Management ──
