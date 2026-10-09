@@ -51,6 +51,14 @@ export function clearSession() {
   localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
   delete axios.defaults.headers.common["Authorization"];
+  
+  // Clear Supabase's default local storage key to prevent ghost sessions
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+      localStorage.removeItem(key);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -164,17 +172,32 @@ export async function validateSession() {
 /** Sign out — revoke on backend AND clear Supabase session */
 export async function signOut() {
   const { accessToken } = getStoredTokens();
-  try {
-    await axios.post(
-      `${API_BASE}/auth/signout`,
-      { access_token: accessToken },
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-  } catch {
-    // Backend signout failed, still clear locally
+  if (accessToken) {
+    try {
+      await axios.post(
+        `${API_BASE}/auth/signout`,
+        { access_token: accessToken },
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+    } catch {
+      // Backend signout failed, ignore
+    }
   }
-  await supabase.auth.signOut();
-  clearSession();
+  
+  try {
+    await supabase.auth.signOut();
+  } catch (err) {
+    console.warn("Supabase signout threw an error, clearing locally anyway:", err);
+  } finally {
+    clearSession();
+    // Also clear Supabase's default local storage key to prevent ghost sessions
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        localStorage.removeItem(key);
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

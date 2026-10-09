@@ -46,6 +46,8 @@ export default function Auth() {
       return;
     }
 
+    localStorage.setItem('quantpilot_terms_pre_accepted', 'true');
+
     try {
       setLoading(true);
       // Uses Supabase client-side SDK for PKCE OAuth (backend validates after)

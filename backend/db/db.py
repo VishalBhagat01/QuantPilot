@@ -98,23 +98,26 @@ def init_db():
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_threads_updated_at ON threads (updated_at DESC);
-                CREATE INDEX IF NOT EXISTS idx_threads_user_id ON threads (user_id);
+            """)
+            conn.commit()
 
+            # For existing installations, try to add user_id column if it doesn't exist
+            try:
+                cur.execute("ALTER TABLE threads ADD COLUMN user_id TEXT;")
+                conn.commit()
+                logger.info("[DB] Added user_id column to existing threads table.")
+            except Exception:
+                conn.rollback() # Column already exists or error
+                
+            # Now we can safely create the index since the column is guaranteed to exist
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_threads_user_id ON threads (user_id);")
+            
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS terms_acceptance (
                     user_id TEXT PRIMARY KEY,
                     accepted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
             """)
             conn.commit()
-            
-            # For existing installations, try to add user_id column if it doesn't exist
-            try:
-                cur.execute("ALTER TABLE threads ADD COLUMN user_id TEXT;")
-                conn.commit()
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_threads_user_id ON threads (user_id);")
-                conn.commit()
-                logger.info("[DB] Added user_id column to existing threads table.")
-            except Exception:
-                conn.rollback() # Column already exists or error
                 
             logger.info("[DB] Threads table and index ensured.")

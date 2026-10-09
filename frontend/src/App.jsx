@@ -77,7 +77,18 @@ export default function App() {
         const { user: existingUser, termsAccepted: accepted } = await initializeAuth()
         if (existingUser) {
           setUser(existingUser)
-          setTermsAccepted(accepted)
+          
+          let finalAccepted = accepted;
+          if (!accepted && localStorage.getItem('quantpilot_terms_pre_accepted') === 'true') {
+            try {
+              await acceptTerms();
+              finalAccepted = true;
+            } catch (e) {
+              console.error("Auto-accept terms failed", e);
+            }
+          }
+          localStorage.removeItem('quantpilot_terms_pre_accepted');
+          setTermsAccepted(finalAccepted)
         }
       } catch (err) {
         console.error("Auth init failed:", err)
@@ -92,8 +103,19 @@ export default function App() {
     const unsubscribe = onAuthStateChange(async (userData, session) => {
       if (userData) {
         setUser(userData)
-        const accepted = await checkTermsAccepted()
+        
+        let accepted = await checkTermsAccepted()
+        if (!accepted && localStorage.getItem('quantpilot_terms_pre_accepted') === 'true') {
+          try {
+            await acceptTerms();
+            accepted = true;
+          } catch (e) {
+            console.error("Auto-accept terms failed", e);
+          }
+        }
+        localStorage.removeItem('quantpilot_terms_pre_accepted');
         setTermsAccepted(accepted)
+        
         setAuthLoading(false)
       } else {
         setUser(null)

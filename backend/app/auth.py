@@ -53,7 +53,10 @@ def verify_user(request: Request):
         if not user_response or not user_response.user:
             raise HTTPException(status_code=401, detail="Invalid token")
         return user_response.user
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"[AUTH] verify_user failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
 
