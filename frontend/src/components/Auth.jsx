@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, ChevronDown, Loader2, Terminal, ArrowRight } from 'lucide-react';
+import { ShieldCheck, ChevronDown, Loader2, ArrowRight } from 'lucide-react';
 import { startGoogleOAuth, getTermsContent } from '../authApi';
+import Logo from './Logo';
 
 /**
  * Auth Component — Login screen with Terms & Conditions gate.
@@ -73,17 +74,12 @@ export default function Auth() {
 
       {/* Logo & Branding */}
       <div className="flex items-center gap-3 mb-10 z-10">
-        <div className="w-10 h-10 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)]">
-          <Terminal size={20} className="text-white" />
+        <div className="w-10 h-10 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)] overflow-hidden">
+          <Logo size={36} />
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-display text-2xl tracking-tight font-black text-[var(--text-primary)]">
-            quantpilot
-          </span>
-          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-            [agent]
-          </span>
-        </div>
+        <span className="font-display text-3xl tracking-tight font-semibold text-[var(--text-primary)]">
+          QuantPilot
+        </span>
       </div>
 
       {/* Main Auth Card */}

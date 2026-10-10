@@ -1,18 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
     Plus, 
     MessageSquare, 
     X, 
     Trash2, 
-    Sparkles, 
     Search,
-    ShieldCheck, 
-    Terminal,
-    ChevronRight,
-    TrendingUp
+    User,
+    Edit2,
+    Check,
 } from 'lucide-react';
+import Logo from './Logo';
 
 export default function Sidebar({ 
+    user,
     threads, 
     activeThreadId, 
     onSelectThread, 
@@ -22,6 +22,26 @@ export default function Sidebar({
     onDeleteThread 
 }) {
     const [searchFilter, setSearchFilter] = useState('');
+    const [isEditingName, setIsEditingName] = useState(false);
+    
+    const defaultName = user?.name || user?.email?.split('@')[0] || 'Pro Trader';
+    const [customName, setCustomName] = useState(
+        localStorage.getItem('quantpilot_custom_name') || defaultName
+    );
+    const nameInputRef = useRef(null);
+
+    useEffect(() => {
+        if (isEditingName) {
+            nameInputRef.current?.focus();
+        }
+    }, [isEditingName]);
+
+    const handleNameSave = () => {
+        setIsEditingName(false);
+        const finalName = customName.trim() || defaultName;
+        setCustomName(finalName);
+        localStorage.setItem('quantpilot_custom_name', finalName);
+    };
 
     const filteredThreads = (threads || []).filter(t => 
         (t.title || '').toLowerCase().includes(searchFilter.toLowerCase())
@@ -36,13 +56,12 @@ export default function Sidebar({
             {/* ── Brand Header ── */}
             <div className="flex items-center justify-between px-5 h-16 border-b border-[var(--border-subtle)] shrink-0">
                 <div className="flex items-center gap-2.5">
-                    <div className="relative w-8 h-8 rounded-xl bg-gradient-to-br from-[var(--color-quant-orange)] to-amber-600 flex items-center justify-center text-white shadow-md shadow-orange-500/25">
-                        <Terminal size={17} className="stroke-[2.5]" />
-                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-[var(--bg-surface)]" />
+                    <div className="relative w-8 h-8 rounded-xl bg-[var(--color-quant-orange)] flex items-center justify-center overflow-hidden shadow-md shadow-orange-500/25">
+                        <Logo size={28} />
                     </div>
                     <div>
                         <div className="flex items-center gap-1.5">
-                            <span className="font-extrabold text-sm tracking-tight text-[var(--text-primary)]">
+                            <span className="font-display text-lg font-semibold tracking-tight text-[var(--text-primary)]">
                                 QuantPilot
                             </span>
                             <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-orange-500/10 text-[var(--color-quant-orange)] border border-orange-500/20">
@@ -164,35 +183,40 @@ export default function Sidebar({
                 )}
             </div>
 
-            {/* ── System Telemetry Pill ── */}
-            <div className="px-4 py-2 shrink-0">
-                <div className="bg-[var(--bg-surface-elevated)]/70 border border-[var(--border-subtle)] rounded-xl p-3 flex items-center justify-between text-[11px]">
-                    <div className="flex items-center gap-2 text-[var(--text-secondary)]">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="font-semibold">LangGraph Swarm</span>
+            {/* ── Account Footer ── */}
+            <div className="shrink-0 p-4 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]/50">
+                <div className="flex items-center gap-3 p-2 -m-2 rounded-xl transition-colors">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[var(--color-quant-orange)] to-orange-400 flex items-center justify-center text-white shadow-sm shrink-0 overflow-hidden">
+                        {user?.avatar_url ? (
+                            <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                        ) : (
+                            <User size={15} className="stroke-[2.5]" />
+                        )}
                     </div>
-                    <span className="text-[10px] font-mono text-[var(--text-tertiary)] uppercase">
-                        Online
-                    </span>
-                </div>
-            </div>
-
-            {/* ── User Profile Footer ── */}
-            <div className="p-4 border-t border-[var(--border-subtle)] shrink-0">
-                <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-[var(--bg-surface-elevated)] transition-colors">
-                    <div className="relative w-9 h-9 rounded-xl bg-gradient-to-tr from-orange-500 to-amber-400 text-white font-black flex items-center justify-center text-xs shadow-sm shrink-0">
-                        VB
-                        <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-[var(--bg-surface)]" />
-                    </div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                        <span className="font-bold text-xs text-[var(--text-primary)] truncate">
-                            Vishal Bhagat
-                        </span>
-                        <div className="flex items-center gap-1">
-                            <span className="text-[10px] font-bold text-[var(--color-quant-orange)] uppercase tracking-wider">
-                                Hedge Fund Pro
-                            </span>
-                        </div>
+                    <div className="flex flex-col flex-1 min-w-0">
+                        {isEditingName ? (
+                            <div className="flex items-center gap-1 w-full">
+                                <input
+                                    ref={nameInputRef}
+                                    type="text"
+                                    value={customName}
+                                    onChange={(e) => setCustomName(e.target.value)}
+                                    onBlur={handleNameSave}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleNameSave()}
+                                    className="text-xs font-bold text-[var(--text-primary)] bg-[var(--bg-surface-elevated)] border border-[var(--color-quant-orange)] rounded px-1.5 py-0.5 outline-none w-full max-w-[120px]"
+                                    placeholder="Enter name"
+                                />
+                                <button onMouseDown={(e) => e.preventDefault()} onClick={handleNameSave} className="text-emerald-500 p-0.5 hover:bg-emerald-500/10 rounded cursor-pointer">
+                                    <Check size={12} strokeWidth={3} />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-1 group/name cursor-pointer w-fit" onClick={() => setIsEditingName(true)} title="Click to edit name">
+                                <span className="text-xs font-bold text-[var(--text-primary)] truncate max-w-[120px]">{customName}</span>
+                                <Edit2 size={10} className="text-[var(--text-tertiary)] opacity-0 group-hover/name:opacity-100 transition-opacity" />
+                            </div>
+                        )}
+                        <span className="text-[10px] text-[var(--text-tertiary)] truncate">{user?.email || 'Pro Plan'}</span>
                     </div>
                 </div>
             </div>

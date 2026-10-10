@@ -1,9 +1,9 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 @theme {
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-display: 'Playfair Display', serif;
+  --font-display: 'Cormorant Garamond', Georgia, serif;
   --font-mono: 'JetBrains Mono', monospace;
 
   --color-quant-orange: #FF6B4A;

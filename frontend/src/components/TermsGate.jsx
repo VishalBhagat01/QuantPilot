@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, ChevronDown, Loader2, Terminal, ArrowRight, LogOut } from 'lucide-react';
+import { ShieldCheck, ChevronDown, Loader2, ArrowRight, LogOut } from 'lucide-react';
 import { getTermsContent } from '../authApi';
+import Logo from './Logo';
 
 /**
  * TermsGate — Full-screen Terms & Conditions acceptance screen.
@@ -56,10 +57,10 @@ export default function TermsGate({ onAccept, onDecline }) {
 
       {/* Logo */}
       <div className="flex items-center gap-3 mb-8 z-10">
-        <div className="w-10 h-10 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)]">
-          <Terminal size={20} className="text-white" />
+        <div className="w-10 h-10 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)] overflow-hidden">
+          <Logo size={36} />
         </div>
-        <span className="font-display text-2xl font-black tracking-tight">quantpilot</span>
+        <span className="font-display text-3xl font-semibold tracking-tight">QuantPilot</span>
       </div>
 
       {/* Main Card */}

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react"
+import { useNavigate, useLocation } from "react-router-dom"
 import axios from "axios"
 import ReactMarkdown from 'react-markdown'
 import Auth from './components/Auth'
@@ -30,7 +31,6 @@ import {
   Moon,
   Copy,
   Check,
-  Terminal,
   Cpu,
   Sparkles,
   ArrowRight,
@@ -40,6 +40,7 @@ import {
 import Sidebar from "./components/Sidebar"
 import StockCard from "./components/StockCard"
 import TradingPanel from "./components/TradingPanel"
+import Logo from "./components/Logo"
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
@@ -69,6 +70,9 @@ export default function App() {
   
   const chatEndRef = useRef(null)
   const inputRef = useRef(null)
+  
+  const navigate = useNavigate()
+  const location = useLocation()
 
   // ── Initialize Auth from Backend ──
   useEffect(() => {
@@ -171,28 +175,51 @@ export default function App() {
     }
   }, [user, termsAccepted])
 
-  const handleSelectThread = async (id) => {
-    setActiveThreadId(id)
-    setLoading(true)
-    try {
-      const res = await axios.get(`${API_BASE}/threads/${id}`)
-      setMessages(res.data.messages)
-    } catch (err) {
-      console.error("Failed to fetch thread history", err)
+  // ── Sync with URL ──
+  useEffect(() => {
+    if (!user || !termsAccepted) return;
+    const path = location.pathname;
+    
+    if (path.startsWith('/c/')) {
+      const id = path.split('/c/')[1];
+      if (id && id !== activeThreadId) {
+        setActiveThreadId(id);
+        loadThreadData(id);
+      }
+    } else if (path === '/') {
+      if (activeThreadId !== null) {
+        setActiveThreadId(null);
+        setMessages([
+          { 
+            role: "assistant", 
+            content: "New intelligence session initialized. How can I assist your portfolio today?" 
+          }
+        ]);
+      }
     }
-    setLoading(false)
+  }, [location.pathname, user, termsAccepted]);
+
+  const loadThreadData = async (id) => {
+    setLoading(true);
+    // Optimistically clear or show skeleton
+    setMessages([]);
+    try {
+      const res = await axios.get(`${API_BASE}/threads/${id}`);
+      setMessages(res.data.messages);
+    } catch (err) {
+      console.error("Failed to fetch thread history", err);
+    }
+    setLoading(false);
+  };
+
+  const handleSelectThread = (id) => {
+    navigate(`/c/${id}`);
   }
 
   const handleNewChat = () => {
-    setActiveThreadId(null)
-    setMessages([
-      { 
-        role: "assistant", 
-        content: "New intelligence session initialized. How can I assist your portfolio today?" 
-      }
-    ])
-    if (window.innerWidth <= 1024) setSidebarOpen(false)
-    inputRef.current?.focus()
+    navigate('/');
+    if (window.innerWidth <= 1024) setSidebarOpen(false);
+    inputRef.current?.focus();
   }
 
   const handleDeleteThread = async (id) => {
@@ -201,7 +228,7 @@ export default function App() {
     try {
       await axios.delete(`${API_BASE}/threads/${id}`)
       if (activeThreadId === id) {
-        handleNewChat()
+        navigate('/');
       }
       fetchThreads()
     } catch (err) {
@@ -230,6 +257,7 @@ export default function App() {
       if (res.data.thread_id && !activeThreadId) {
         setActiveThreadId(res.data.thread_id)
         fetchThreads()
+        navigate(`/c/${res.data.thread_id}`, { replace: true })
       }
     } catch (err) {
       console.error("Analysis failed:", err)
@@ -276,10 +304,10 @@ export default function App() {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-[var(--bg-base)] text-[var(--text-primary)]">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)]">
-            <Terminal size={20} className="text-white" />
+          <div className="w-10 h-10 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)] overflow-hidden">
+            <Logo size={36} />
           </div>
-          <span className="font-display text-2xl font-black tracking-tight">quantpilot</span>
+          <span className="font-display text-3xl font-semibold tracking-tight">QuantPilot</span>
         </div>
         <Loader2 size={24} className="animate-spin text-[var(--color-quant-orange)]" />
         <p className="mt-3 font-mono text-xs text-[var(--text-tertiary)]">Initializing session...</p>
@@ -301,6 +329,7 @@ export default function App() {
     <div className="flex h-screen w-screen overflow-hidden relative bg-[var(--bg-base)] text-[var(--text-primary)]">
       {/* ── Sidebar ── */}
       <Sidebar
+        user={user}
         threads={threads}
         activeThreadId={activeThreadId}
         onSelectThread={handleSelectThread}
@@ -331,17 +360,12 @@ export default function App() {
             </button>
 
             <div className="flex items-center gap-2.5 group cursor-default">
-              <div className="w-8 h-8 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)] group-hover:rotate-6 transition-transform">
-                <Terminal size={16} className="text-white" />
+              <div className="w-8 h-8 rounded-xl bg-[var(--color-quant-orange)] border-2 border-[var(--border-subtle)] flex items-center justify-center shadow-[var(--shadow-sm)] group-hover:rotate-6 transition-transform overflow-hidden">
+                <Logo size={28} />
               </div>
-              <div className="flex items-center gap-2">
-                <span className="font-display text-base sm:text-lg tracking-tight font-black text-[var(--text-primary)]">
-                  quantpilot
-                </span>
-                <span className="hidden sm:inline-block text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)]">
-                  [agent]
-                </span>
-              </div>
+              <span className="font-display text-lg sm:text-xl tracking-tight font-semibold text-[var(--text-primary)]">
+                QuantPilot
+              </span>
             </div>
           </div>
 
@@ -552,9 +576,8 @@ export default function App() {
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between px-3 mt-2 text-[10px] text-[var(--text-tertiary)] select-none">
+                  <div className="flex items-center justify-center px-3 mt-2 text-[10px] text-[var(--text-tertiary)] select-none">
                     <span>Press <kbd className="font-mono bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] px-1 py-0.5 rounded text-[9px]">Enter ↵</kbd> to submit</span>
-                    <span className="hidden sm:inline">LLM Model dynamic switching active via .env</span>
                   </div>
                 </div>
               </div>
