@@ -1,6 +1,8 @@
 """Data ingestion tools for real-time market data, company fundamentals, and trading signals."""
 
+import time
 import logging
+from threading import Lock
 from datetime import datetime, timedelta
 import requests
 import pandas as pd
@@ -13,6 +15,45 @@ logger = logging.getLogger(__name__)
 FINNHUB_KEY = settings.finnhub_api_key
 ALPHA_KEY = settings.alphavantage_api_key
 TIMEOUT = settings.http_timeout
+
+
+class SimpleTTLCache:
+    """Thread-safe in-memory cache with configurable TTL (seconds)."""
+    def __init__(self, default_ttl_seconds: int = 60, max_size: int = 250):
+        self.default_ttl = default_ttl_seconds
+        self.max_size = max_size
+        self._cache = {}
+        self._lock = Lock()
+
+    def get(self, key: str):
+        with self._lock:
+            item = self._cache.get(key)
+            if not item:
+                return None
+            val, expiry = item
+            if time.time() > expiry:
+                del self._cache[key]
+                return None
+            return val
+
+    def set(self, key: str, val, ttl_seconds: int = None):
+        with self._lock:
+            now = time.time()
+            if len(self._cache) >= self.max_size:
+                expired = [k for k, (_, exp) in self._cache.items() if now > exp]
+                for k in expired:
+                    del self._cache[k]
+                if len(self._cache) >= self.max_size:
+                    for k in list(self._cache.keys())[:int(self.max_size * 0.2)]:
+                        del self._cache[k]
+            ttl = ttl_seconds if ttl_seconds is not None else self.default_ttl
+            self._cache[key] = (val, now + ttl)
+
+
+# High-performance in-memory cache instances
+_price_cache = SimpleTTLCache(default_ttl_seconds=60)      # 1 minute quote cache
+_news_cache = SimpleTTLCache(default_ttl_seconds=300)      # 5 minutes news cache
+_overview_cache = SimpleTTLCache(default_ttl_seconds=43200) # 12 hours fundamentals cache
 
 
 def _safe_get(url: str, timeout: float = TIMEOUT) -> dict | list | None:
@@ -38,12 +79,18 @@ def get_stock_price(symbol: str):
     """
     clean_sym = symbol.strip().upper()
 
+    # Fast cache lookup (sub-millisecond)
+    cached = _price_cache.get(clean_sym)
+    if cached:
+        logger.info(f"[CACHE HIT] get_stock_price({clean_sym})")
+        return cached
+
     # 1. Try Finnhub
     if FINNHUB_KEY:
         try:
             d = _safe_get(f"https://finnhub.io/api/v1/quote?symbol={clean_sym}&token={FINNHUB_KEY}")
             if isinstance(d, dict) and d.get("c") and d["c"] > 0:
-                return {
+                result = {
                     "symbol": clean_sym,
                     "current": float(d["c"]),
                     "high": float(d.get("h", d["c"])),
@@ -52,6 +99,8 @@ def get_stock_price(symbol: str):
                     "prev_close": float(d.get("pc", d["c"])),
                     "timestamp": d.get("t", int(datetime.now().timestamp())),
                 }
+                _price_cache.set(clean_sym, result)
+                return result
         except Exception:
             pass
 
@@ -61,7 +110,7 @@ def get_stock_price(symbol: str):
         ticker = yf.Ticker(clean_sym)
         info = ticker.fast_info
         current = float(info.last_price or 0.0)
-        return {
+        result = {
             "symbol": clean_sym,
             "current": round(current, 2),
             "high": round(float(getattr(info, "day_high", current) or current), 2),
@@ -70,6 +119,8 @@ def get_stock_price(symbol: str):
             "prev_close": round(float(getattr(info, "previous_close", current) or current), 2),
             "timestamp": int(datetime.now().timestamp()),
         }
+        _price_cache.set(clean_sym, result)
+        return result
     except Exception as e:
         return {"symbol": clean_sym, "error": f"Failed to retrieve price for {clean_sym}: {str(e)}"}
 
@@ -79,6 +130,11 @@ def get_stock_news(symbol: str):
     """Fetch the most recent news articles related to a stock symbol."""
     clean_sym = symbol.strip().upper()
 
+    cached = _news_cache.get(clean_sym)
+    if cached:
+        logger.info(f"[CACHE HIT] get_stock_news({clean_sym})")
+        return cached
+
     # 1. Try Finnhub
     if FINNHUB_KEY:
         try:
@@ -87,7 +143,7 @@ def get_stock_news(symbol: str):
             url = f"https://finnhub.io/api/v1/company-news?symbol={clean_sym}&from={one_month_ago}&to={today}&token={FINNHUB_KEY}"
             data = _safe_get(url)
             if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict) and "headline" in data[0]:
-                return [
+                results = [
                     {
                         "headline": n["headline"],
                         "summary": n.get("summary", ""),
@@ -97,6 +153,8 @@ def get_stock_news(symbol: str):
                     }
                     for n in data[:5]
                 ]
+                _news_cache.set(clean_sym, results)
+                return results
         except Exception:
             pass
 
@@ -116,11 +174,13 @@ def get_stock_news(symbol: str):
                     "url": content.get("canonicalUrl", {}).get("url", ""),
                     "time": content.get("pubDate") or "",
                 })
+            _news_cache.set(clean_sym, results)
             return results
     except Exception:
         pass
 
-    return [{"headline": f"No recent news available for {clean_sym}.", "summary": "", "source": "", "url": "", "time": ""}]
+    fallback = [{"headline": f"No recent news available for {clean_sym}.", "summary": "", "source": "", "url": "", "time": ""}]
+    return fallback
 
 
 @tool
@@ -217,11 +277,17 @@ def top_gainers():
 def company_overview(symbol: str):
     """Retrieve company fundamental and valuation metrics."""
     clean_sym = symbol.strip().upper()
+
+    cached = _overview_cache.get(clean_sym)
+    if cached:
+        logger.info(f"[CACHE HIT] company_overview({clean_sym})")
+        return cached
+
     url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={clean_sym}&apikey={ALPHA_KEY}"
     d = _safe_get(url)
 
     if d and "Name" in d:
-        return {
+        result = {
             "name": d.get("Name", clean_sym),
             "sector": d.get("Sector", "N/A"),
             "market_cap": d.get("MarketCapitalization", "N/A"),
@@ -230,12 +296,14 @@ def company_overview(symbol: str):
             "revenue": d.get("RevenueTTM", "N/A"),
             "profit_margin": d.get("ProfitMargin", "N/A"),
         }
+        _overview_cache.set(clean_sym, result)
+        return result
 
     # Fallback to yfinance
     try:
         import yfinance as yf
         info = yf.Ticker(clean_sym).info
-        return {
+        result = {
             "name": info.get("longName", clean_sym),
             "sector": info.get("sector", "N/A"),
             "market_cap": info.get("marketCap", "N/A"),
@@ -244,6 +312,8 @@ def company_overview(symbol: str):
             "revenue": info.get("totalRevenue", "N/A"),
             "profit_margin": info.get("profitMargins", "N/A"),
         }
+        _overview_cache.set(clean_sym, result)
+        return result
     except Exception:
         return {"name": clean_sym, "sector": "N/A", "market_cap": "N/A", "pe": "N/A", "eps": "N/A", "revenue": "N/A", "profit_margin": "N/A"}
 
@@ -292,53 +362,93 @@ def get_silver_price():
     return _safe_get(url) or {"error": "Silver price unavailable"}
 
 
+TIMEFRAME_CONFIG = {
+    "1D": ("1d", "5m", "%H:%M", 60),
+    "5D": ("5d", "15m", "%a %H:%M", 300),
+    "1M": ("1mo", "1d", "%b %d", 1800),
+    "6M": ("6mo", "1d", "%b %d", 3600),
+    "1Y": ("1y", "1wk", "%b %y", 7200),
+}
+
+_chart_cache = SimpleTTLCache(default_ttl_seconds=300)
+
+
+def get_stock_chart_data(symbol: str, timeframe: str = "1D"):
+    """Fetch structured historical OHLC chart series for specified timeframe."""
+    clean_sym = symbol.strip().upper()
+    tf = timeframe.upper().strip()
+    if tf not in TIMEFRAME_CONFIG:
+        tf = "1D"
+
+    cache_key = f"{clean_sym}:{tf}"
+    cached = _chart_cache.get(cache_key)
+    if cached:
+        logger.info(f"[CACHE HIT] get_stock_chart_data({cache_key})")
+        return cached
+
+    period, interval, date_fmt, ttl = TIMEFRAME_CONFIG[tf]
+    chart_data = []
+
+    try:
+        import yfinance as yf
+        hist = yf.download(clean_sym, period=period, interval=interval, progress=False)
+        if not hist.empty:
+            closes = hist["Close"].squeeze()
+            highs = hist["High"].squeeze() if "High" in hist else closes
+            lows = hist["Low"].squeeze() if "Low" in hist else closes
+
+            # Sample if points > 80 to maintain smooth chart render performance
+            step = max(1, len(closes) // 70) if len(closes) > 80 else 1
+            sampled = closes.iloc[::step]
+            if sampled.index[-1] != closes.index[-1]:
+                sampled = pd.concat([sampled, closes.iloc[[-1]]])
+
+            for idx, val in sampled.items():
+                time_str = idx.strftime(date_fmt) if hasattr(idx, "strftime") else str(idx)
+                chart_data.append({
+                    "time": time_str,
+                    "price": round(float(val), 2)
+                })
+
+            first_val = float(closes.iloc[0])
+            last_val = float(closes.iloc[-1])
+            max_val = float(highs.max())
+            min_val = float(lows.min())
+
+            result = {
+                "chart": chart_data,
+                "first_price": round(first_val, 2),
+                "last_price": round(last_val, 2),
+                "period_high": round(max_val, 2),
+                "period_low": round(min_val, 2),
+                "timeframe": tf
+            }
+            _chart_cache.set(cache_key, result, ttl_seconds=ttl)
+            return result
+    except Exception as e:
+        logger.warning(f"Error fetching chart data for {clean_sym} ({tf}): {e}")
+
+    return {
+        "chart": [],
+        "first_price": None,
+        "last_price": None,
+        "period_high": None,
+        "period_low": None,
+        "timeframe": tf
+    }
+
+
 @tool
 def get_stock_intraday_chart(symbol: str):
     """Retrieve intraday price series (5-minute interval) for charting."""
-    clean_sym = symbol.strip().upper()
-
-    # 1. Try AlphaVantage
-    if ALPHA_KEY:
-        try:
-            url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={clean_sym}&interval=5min&outputsize=compact&apikey={ALPHA_KEY}"
-            data = _safe_get(url, timeout=5.0)
-            if data and "Time Series (5min)" in data:
-                time_series = data["Time Series (5min)"]
-                chart_data = []
-                for timestamp in sorted(time_series.keys())[-50:]:
-                    ohlc = time_series[timestamp]
-                    chart_data.append({
-                        "time": timestamp.split(" ")[1][:5] if " " in timestamp else timestamp,
-                        "price": float(ohlc.get("4. close", ohlc.get("1. open", 0)))
-                    })
-                if chart_data:
-                    return chart_data
-        except Exception:
-            pass
-
-    # 2. Fallback to yfinance 1-day 5-min candles
-    try:
-        import yfinance as yf
-        hist = yf.download(clean_sym, period="1d", interval="5m", progress=False)
-        if not hist.empty:
-            chart_data = []
-            closes = hist["Close"].squeeze()
-            for idx, val in closes.tail(50).items():
-                time_str = idx.strftime("%H:%M") if hasattr(idx, "strftime") else str(idx)
-                chart_data.append({"time": time_str, "price": round(float(val), 2)})
-            if chart_data:
-                return chart_data
-    except Exception:
-        pass
-
-    return []
+    data = get_stock_chart_data(symbol, timeframe="1D")
+    return data.get("chart", [])
 
 
-def fetch_stock_dashboard_data(symbol: str):
-    """Directly fetches aggregated data for the dashboard widget with resilient fallbacks."""
+def fetch_stock_dashboard_data(symbol: str, timeframe: str = "1D"):
+    """Directly fetches aggregated data for the dashboard widget with dynamic timeframe support."""
     clean_sym = symbol.strip().upper()
     quote = {}
-    chart = []
     overview = {}
 
     try:
@@ -347,19 +457,31 @@ def fetch_stock_dashboard_data(symbol: str):
         pass
 
     try:
-        chart = get_stock_intraday_chart.invoke({"symbol": clean_sym})
-    except Exception:
-        chart = []
-
-    try:
         overview = company_overview.invoke({"symbol": clean_sym})
     except Exception:
         overview = {}
 
-    cur_price = quote.get("current")
+    chart_info = get_stock_chart_data(clean_sym, timeframe=timeframe)
+    chart = chart_info.get("chart", [])
+
+    cur_price = quote.get("current") or chart_info.get("last_price")
     prev_close = quote.get("prev_close")
-    change = round(cur_price - prev_close, 2) if cur_price and prev_close else 0.0
-    percent = round((change / prev_close) * 100, 2) if prev_close and prev_close > 0 else 0.0
+
+    tf = timeframe.upper().strip()
+    if tf == "1D" and prev_close:
+        change = round(cur_price - prev_close, 2) if cur_price else 0.0
+        percent = round((change / prev_close) * 100, 2) if prev_close > 0 else 0.0
+    elif chart_info.get("first_price") and cur_price:
+        start_p = chart_info["first_price"]
+        change = round(cur_price - start_p, 2)
+        percent = round((change / start_p) * 100, 2) if start_p > 0 else 0.0
+    else:
+        change = round(cur_price - prev_close, 2) if cur_price and prev_close else 0.0
+        percent = round((change / prev_close) * 100, 2) if prev_close and prev_close > 0 else 0.0
+
+    high = chart_info.get("period_high") or quote.get("high")
+    low = chart_info.get("period_low") or quote.get("low")
+    open_price = chart_info.get("first_price") or quote.get("open")
 
     return {
         "symbol": clean_sym,
@@ -367,13 +489,14 @@ def fetch_stock_dashboard_data(symbol: str):
         "price": cur_price,
         "change": change,
         "percent": percent,
-        "open": quote.get("open"),
-        "high": quote.get("high"),
-        "low": quote.get("low"),
+        "open": open_price,
+        "high": high,
+        "low": low,
         "prev_close": prev_close,
         "volume": quote.get("volume"),
         "market_cap": overview.get("market_cap") or overview.get("MarketCapitalization"),
-        "chart": chart
+        "chart": chart,
+        "timeframe": tf
     }
 
 

@@ -70,6 +70,7 @@ export default function App() {
   
   const chatEndRef = useRef(null)
   const inputRef = useRef(null)
+  const threadCache = useRef({})
   
   const navigate = useNavigate()
   const location = useLocation()
@@ -200,12 +201,25 @@ export default function App() {
   }, [location.pathname, user, termsAccepted]);
 
   const loadThreadData = async (id) => {
+    // If we already have the messages in cache, show them instantly
+    if (threadCache.current[id]) {
+      setMessages(threadCache.current[id]);
+      setLoading(false);
+      // Fetch in background to ensure it's up to date
+      axios.get(`${API_BASE}/threads/${id}`).then(res => {
+        setMessages(res.data.messages);
+        threadCache.current[id] = res.data.messages;
+      }).catch(err => console.error("Background sync failed", err));
+      return;
+    }
+
     setLoading(true);
     // Optimistically clear or show skeleton
     setMessages([]);
     try {
       const res = await axios.get(`${API_BASE}/threads/${id}`);
       setMessages(res.data.messages);
+      threadCache.current[id] = res.data.messages;
     } catch (err) {
       console.error("Failed to fetch thread history", err);
     }
@@ -238,36 +252,194 @@ export default function App() {
   }
 
   const executeQuery = async (queryText) => {
-    if (!queryText.trim()) return
+    if (!queryText.trim() || loading) return
 
     const userMessage = { role: "user", content: queryText }
-    setMessages(prev => [...prev, userMessage])
+    const streamingAiMessage = {
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      status: "Initializing QuantPilot agent...",
+      fact: null,
+      symbol: null,
+      tools: []
+    }
+
+    setMessages(prev => {
+      const next = [...prev, userMessage, streamingAiMessage];
+      if (activeThreadId) threadCache.current[activeThreadId] = next;
+      return next;
+    })
     setInput("")
     setLoading(true)
 
     try {
-      const res = await axios.post(`${API_BASE}/analyze`, {
-        query: queryText,
-        thread_id: activeThreadId
-      })
+      const { accessToken } = getStoredTokens();
+      const response = await fetch(`${API_BASE}/analyze/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { "Authorization": `Bearer ${accessToken}` } : {})
+        },
+        body: JSON.stringify({
+          query: queryText,
+          thread_id: activeThreadId
+        })
+      });
 
-      const aiMessage = { role: "assistant", content: res.data.response }
-      setMessages(prev => [...prev, aiMessage])
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
 
-      if (res.data.thread_id && !activeThreadId) {
-        setActiveThreadId(res.data.thread_id)
-        fetchThreads()
-        navigate(`/c/${res.data.thread_id}`, { replace: true })
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let currentContent = "";
+      let newThreadId = activeThreadId;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop(); // keep partial chunk in buffer
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith(":")) continue; // ignore keepalive pings
+
+          if (trimmed.startsWith("data:")) {
+            const rawData = trimmed.replace(/^data:\s*/, "");
+            try {
+              const event = JSON.parse(rawData);
+
+              if (event.type === "ack") {
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      symbol: event.symbol,
+                      fact: event.fact,
+                      status: event.name ? `Gathering market intelligence for ${event.name}...` : "Formulating data plan..."
+                    };
+                  }
+                  return updated;
+                });
+              } else if (event.type === "status") {
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      status: event.message
+                    };
+                  }
+                  return updated;
+                });
+              } else if (event.type === "tools_start") {
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      status: event.message,
+                      tools: event.tools || []
+                    };
+                  }
+                  return updated;
+                });
+              } else if (event.type === "tools_done") {
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      status: event.message
+                    };
+                  }
+                  return updated;
+                });
+              } else if (event.type === "token") {
+                currentContent += event.content;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      content: currentContent,
+                      status: null // clear loading status badge once tokens begin streaming
+                    };
+                  }
+                  return updated;
+                });
+              } else if (event.type === "done") {
+                newThreadId = event.thread_id || activeThreadId;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      isStreaming: false,
+                      status: null
+                    };
+                  }
+                  if (newThreadId) threadCache.current[newThreadId] = updated;
+                  return updated;
+                });
+
+                if (event.thread_id && !activeThreadId) {
+                  setActiveThreadId(event.thread_id);
+                  fetchThreads();
+                  navigate(`/c/${event.thread_id}`, { replace: true });
+                }
+              } else if (event.type === "error") {
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last && last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      content: (last.content || "") + `\n\n⚠️ ${event.message}`,
+                      isStreaming: false,
+                      status: null
+                    };
+                  }
+                  return updated;
+                });
+              }
+            } catch (jsonErr) {
+              console.warn("Failed to parse SSE event", jsonErr, rawData);
+            }
+          }
+        }
       }
     } catch (err) {
-      console.error("Analysis failed:", err)
-      setMessages(prev => [...prev, {
-        role: "assistant",
-        content: "Network or Agent Disruption: Could not reach the backend execution agent. Please verify that the FastAPI server is running."
-      }])
+      console.error("Streaming analysis failed:", err)
+      setMessages(prev => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last && last.role === "assistant" && last.isStreaming) {
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: "Network or Agent Disruption: Could not reach the backend execution agent. Please verify that the FastAPI server is running.",
+            isStreaming: false,
+            status: null
+          };
+        }
+        if (activeThreadId) threadCache.current[activeThreadId] = updated;
+        return updated;
+      })
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false)
   }
 
   const sendMessage = () => {
@@ -485,10 +657,43 @@ export default function App() {
                           </p>
                         ) : (
                           <div className="prose text-sm">
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            {/* Speculative Market Trivia & Insight Box */}
+                            {msg.fact && (
+                              <div className="mb-3.5 px-3.5 py-2.5 rounded-xl bg-[var(--bg-surface)] border-2 border-[var(--border-subtle)] flex items-start gap-2.5 text-xs text-[var(--text-secondary)] shadow-sm animate-in fade-in duration-300">
+                                <div className="p-1 rounded-lg bg-amber-500/10 text-amber-500 shrink-0 mt-0.5">
+                                  <Sparkles size={13} />
+                                </div>
+                                <div className="flex-1 leading-relaxed">
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <span className="font-mono font-bold text-[10px] uppercase tracking-wider text-[var(--color-quant-orange)]">
+                                      {msg.symbol ? `${msg.symbol} Market Intelligence` : 'Market Trivia'}
+                                    </span>
+                                  </div>
+                                  <p className="font-mono text-[11px] text-[var(--text-primary)]/90">{msg.fact}</p>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Live Agent Lifecycle / Tool Progress Pill */}
+                            {msg.status && (
+                              <div className="my-2.5 px-3.5 py-2 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] flex items-center gap-2.5 text-xs font-mono text-[var(--text-secondary)] animate-pulse">
+                                <Loader2 size={13} className="animate-spin text-[var(--color-quant-orange)]" />
+                                <span>{msg.status}</span>
+                              </div>
+                            )}
+
+                            {/* Markdown Content & Pulsing Cursor */}
+                            {msg.content && (
+                              <div>
+                                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                {msg.isStreaming && (
+                                  <span className="inline-block w-1.5 h-3.5 ml-1 bg-[var(--color-quant-orange)] animate-pulse align-middle" />
+                                )}
+                              </div>
+                            )}
 
                             {/* Embedded StockCard if DASHBOARD: is returned by agent */}
-                            {msg.content.includes("DASHBOARD:") && (
+                            {msg.content && msg.content.includes("DASHBOARD:") && (
                               <div className="mt-5">
                                 <StockCard 
                                   symbol={msg.content.split("DASHBOARD:")[1].trim().split(" ")[0].split("\n")[0]}
@@ -501,26 +706,28 @@ export default function App() {
                             )}
 
                             {/* Copy button & telemetry */}
-                            <div className="mt-3 pt-2.5 border-t border-[var(--border-subtle)] flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
-                              <span className="font-mono text-[10px]">QuantPilot Engine</span>
-                              <button
-                                onClick={() => copyMessage(msg.content, idx)}
-                                className="flex items-center gap-1 hover:text-[var(--text-primary)] transition-colors p-1 rounded cursor-pointer"
-                                title="Copy response to clipboard"
-                              >
-                                {copiedIdx === idx ? (
-                                  <>
-                                    <Check size={12} className="text-emerald-500" />
-                                    <span className="text-emerald-500 text-[10px]">Copied</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy size={12} />
-                                    <span className="text-[10px]">Copy</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
+                            {!msg.isStreaming && msg.content && (
+                              <div className="mt-3 pt-2.5 border-t border-[var(--border-subtle)] flex items-center justify-between text-[11px] text-[var(--text-tertiary)]">
+                                <span className="font-mono text-[10px]">QuantPilot Engine</span>
+                                <button
+                                  onClick={() => copyMessage(msg.content, idx)}
+                                  className="flex items-center gap-1 hover:text-[var(--text-primary)] transition-colors p-1 rounded cursor-pointer"
+                                  title="Copy response to clipboard"
+                                >
+                                  {copiedIdx === idx ? (
+                                    <>
+                                      <Check size={12} className="text-emerald-500" />
+                                      <span className="text-emerald-500 text-[10px]">Copied</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy size={12} />
+                                      <span className="text-[10px]">Copy</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -535,8 +742,8 @@ export default function App() {
                   )
                 })}
 
-                {/* Loading indicator */}
-                {loading && (
+                {/* Fallback loading indicator if no assistant message is actively streaming */}
+                {loading && (!messages.length || !messages[messages.length - 1].isStreaming) && (
                   <div className="flex px-2 sm:px-6 py-5 gap-3.5 sm:gap-4 max-w-4xl mx-auto w-full animate-in fade-in duration-200">
                     <div className="w-8 h-8 rounded-xl bg-[var(--bg-surface)] border-2 border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center shrink-0 mt-0.5 shadow-[var(--shadow-sm)]">
                       <Bot size={16} />

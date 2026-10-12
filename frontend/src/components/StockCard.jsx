@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
     TrendingUp, 
@@ -19,30 +19,54 @@ import StockChart from './StockChart';
 const StockCard = ({ symbol, onTrade }) => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [rangeLoading, setRangeLoading] = useState(false);
     const [error, setError] = useState(null);
     const [activeRange, setActiveRange] = useState('1D');
     const [expanded, setExpanded] = useState(false);
+    const cacheRef = useRef({});
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                setLoading(true);
-                const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
-                const response = await axios.post(`${API_BASE}/agent/stock`, { symbol });
+    const fetchRangeData = async (rangeToFetch) => {
+        if (!symbol) return;
+        
+        // Instant response from component-level memory cache
+        if (cacheRef.current[rangeToFetch]) {
+            setData(cacheRef.current[rangeToFetch]);
+            return;
+        }
+
+        try {
+            setRangeLoading(true);
+            const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+            const response = await axios.post(`${API_BASE}/agent/stock`, { 
+                symbol, 
+                range: rangeToFetch 
+            });
+            if (response.data) {
+                cacheRef.current[rangeToFetch] = response.data;
                 setData(response.data);
                 setError(null);
-            } catch (err) {
-                console.error("Error fetching stock data:", err);
-                setError("Could not load asset intelligence.");
-            } finally {
-                setLoading(false);
             }
-        };
-
-        if (symbol) {
-            fetchData();
+        } catch (err) {
+            console.error("Error switching timeframe:", err);
+            if (!data) setError("Could not load asset intelligence.");
+        } finally {
+            setRangeLoading(false);
+            setLoading(false);
         }
+    };
+
+    useEffect(() => {
+        cacheRef.current = {};
+        setActiveRange('1D');
+        setLoading(true);
+        fetchRangeData('1D');
     }, [symbol]);
+
+    const handleRangeChange = (newRange) => {
+        if (newRange === activeRange || rangeLoading) return;
+        setActiveRange(newRange);
+        fetchRangeData(newRange);
+    };
 
     if (loading) return (
         <div className="flex items-center gap-3.5 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl p-5 w-full max-w-2xl mx-auto shadow-[var(--shadow-card)]">
@@ -114,12 +138,13 @@ const StockCard = ({ symbol, onTrade }) => {
                     {['1D', '5D', '1M', '6M', '1Y'].map((range) => (
                         <button
                             key={range}
-                            onClick={() => setActiveRange(range)}
-                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wider transition-all duration-150 ${
+                            onClick={() => handleRangeChange(range)}
+                            disabled={rangeLoading}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wider transition-all duration-150 cursor-pointer ${
                                 activeRange === range 
                                     ? 'bg-[var(--color-quant-orange)] text-white shadow-sm font-black' 
                                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                            }`}
+                            } ${rangeLoading && activeRange !== range ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                             {range}
                         </button>
@@ -132,7 +157,7 @@ const StockCard = ({ symbol, onTrade }) => {
                 <span className="text-3xl sm:text-4xl md:text-5xl font-extrabold font-mono text-[var(--text-primary)] tracking-tight leading-none">
                     ${data.price?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
-                <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono tracking-tight ${
+                <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono tracking-tight transition-colors duration-200 ${
                     isPositive 
                         ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
                         : 'bg-red-500/10 text-red-500 border border-red-500/20'
@@ -141,6 +166,9 @@ const StockCard = ({ symbol, onTrade }) => {
                     <span>
                         {isPositive ? '+' : ''}{data.change?.toFixed(2)} ({data.percent?.toFixed(2)}%)
                     </span>
+                    {activeRange !== '1D' && (
+                        <span className="text-[10px] opacity-75 font-normal ml-0.5">({activeRange})</span>
+                    )}
                 </div>
             </div>
 
@@ -148,6 +176,16 @@ const StockCard = ({ symbol, onTrade }) => {
             <div className="h-[190px] w-full relative mb-6 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)]/60 p-2 overflow-hidden">
                 <StockChart data={data.chart} color={chartColor} />
                 
+                {/* Timeframe Transition Overlay */}
+                {rangeLoading && (
+                    <div className="absolute inset-0 bg-[var(--bg-surface)]/60 backdrop-blur-[2px] flex items-center justify-center z-20 animate-in fade-in duration-150">
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs font-mono font-bold text-[var(--text-secondary)] shadow-sm">
+                            <Loader2 size={13} className="animate-spin text-[var(--color-quant-orange)]" />
+                            <span>Loading {activeRange}...</span>
+                        </div>
+                    </div>
+                )}
+
                 {/* Confidence Badge */}
                 <div className="absolute top-3 right-3 flex items-center gap-1.5 text-[10px] font-bold text-[var(--text-secondary)] bg-[var(--bg-surface)]/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-[var(--border-subtle)] shadow-sm">
                     <Cpu size={11} className="text-[var(--color-quant-orange)]" />
