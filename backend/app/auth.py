@@ -1,20 +1,26 @@
-"""
-Backend Authentication Module — All auth logic centralized server-side.
 
-Handles:
-  - Google OAuth URL generation & callback processing
-  - JWT session verification via Supabase
-  - Token refresh
-  - Sign-out
-  - Terms & Conditions acceptance tracking (stored in DB)
+"""
+Backend Authentication Module.
+
+Centralizes authentication and authorization-related operations:
+- Google OAuth URL generation and callback code exchange
+- Supabase JWT verification
+- Access-token refresh and sign-out
+- User profile serialization
+- Terms & Conditions acceptance persistence
+
+Business logic, public function names, return payloads, and database
+operations are kept compatible with the existing implementation.
 """
 
-import os
 import datetime
 import logging
-from fastapi import Request, HTTPException, Depends
-from supabase import create_client, Client
+import os
+from typing import Any
+
 from dotenv import load_dotenv
+from fastapi import HTTPException, Request
+from supabase import Client, create_client
 
 load_dotenv()
 
@@ -24,183 +30,300 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-
 def get_supabase() -> Client:
-    """Create and return a Supabase client. Raises 500 if credentials are missing."""
+    """Create and return a Supabase client."""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        raise HTTPException(status_code=500, detail="Supabase credentials not configured in backend")
+        raise HTTPException(
+            status_code=500,
+            detail="Supabase credentials not configured in backend",
+        )
+
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
+def _get_user_metadata(user: Any) -> dict[str, Any]:
+    """Safely retrieve user metadata from an authentication response."""
+    metadata = (
+        user.get("user_metadata", {})
+        if isinstance(user, dict)
+        else getattr(user, "user_metadata", {})
+    )
 
-def verify_user(request: Request):
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _serialize_user(user: Any) -> dict[str, Any]:
+    """Convert a Supabase user object into the public profile payload."""
+    if isinstance(user, dict):
+        user_id = user.get("id")
+        email = user.get("email")
+    else:
+        user_id = user.id
+        email = user.email
+
+    metadata = _get_user_metadata(user)
+
+    return {
+        "id": user_id,
+        "email": email,
+        "name": metadata.get("full_name", ""),
+        "avatar_url": metadata.get("avatar_url", ""),
+    }
+
+
+def _serialize_session(session: Any, user: Any) -> dict[str, Any]:
+    """Build the standard authentication session response."""
+    return {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+        "expires_at": session.expires_at,
+        "user": _serialize_user(user),
+    }
+
+
+def verify_user(request: Request) -> Any:
     """
-    FastAPI dependency: verify the JWT token from the Authorization header
-    using the backend Supabase client. Returns the authenticated user object.
+    FastAPI dependency that validates the Bearer token through Supabase.
+
+    Returns the authenticated Supabase user object.
+
+    Note:
+        The existing development bypass is preserved for compatibility.
+        It must not be enabled in production.
     """
-    # Dev-mode bypass when credentials are absent
+    # Preserve the existing development-mode behavior.
     if not SUPABASE_URL or not SUPABASE_KEY:
         return {"id": "dev_user"}
 
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    auth_header = request.headers.get("Authorization", "")
 
-    token = auth_header.split(" ")[1]
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header",
+        )
+
+    token = auth_header.split(" ", 1)[1]
+
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header",
+        )
+
     supabase = get_supabase()
 
     try:
         user_response = supabase.auth.get_user(token)
+
         if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token",
+            )
+
         return user_response.user
+
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"[AUTH] verify_user failed: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
 
+    except Exception as exc:
+        logger.error(
+            "[AUTH] User verification failed",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=401,
+            detail=f"Authentication failed: {str(exc)}",
+        ) from exc
 
-# ---------------------------------------------------------------------------
-# OAuth Flow Endpoints (called from router in main.py)
-# ---------------------------------------------------------------------------
+# Google OAuth
 
-def get_google_oauth_url() -> dict:
+def get_google_oauth_url() -> dict[str, Any]:
     """
-    Generate the Supabase-managed Google OAuth redirect URL.
-    The frontend calls this endpoint and redirects the browser to the returned URL.
+    Generate the Supabase-managed Google OAuth URL.
+
+    The frontend redirects the browser to the returned URL.
     """
     supabase = get_supabase()
+
     try:
-        response = supabase.auth.sign_in_with_oauth({
-            "provider": "google",
-            "options": {
-                "redirect_to": f"{FRONTEND_URL}/auth/callback",
-            },
-        })
+        response = supabase.auth.sign_in_with_oauth(
+            {
+                "provider": "google",
+                "options": {
+                    "redirect_to": f"{FRONTEND_URL}/auth/callback",
+                },
+            }
+        )
+
         return {"url": response.url}
-    except Exception as e:
-        logger.error(f"[AUTH] Google OAuth URL generation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"OAuth setup failed: {str(e)}")
+
+    except Exception as exc:
+        logger.error(
+            "[AUTH] Google OAuth URL generation failed",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"OAuth setup failed: {str(exc)}",
+        ) from exc
 
 
-def exchange_code_for_session(code: str) -> dict:
+def exchange_code_for_session(code: str) -> dict[str, Any]:
     """
-    Exchange the OAuth authorization code for a full Supabase session.
-    Returns access_token, refresh_token, user info.
+    Exchange an OAuth authorization code for a Supabase session.
+
+    Returns access_token, refresh_token, expiry, and user information.
     """
     supabase = get_supabase()
+
     try:
-        response = supabase.auth.exchange_code_for_session({"auth_code": code})
+        response = supabase.auth.exchange_code_for_session(
+            {"auth_code": code}
+        )
+
         session = response.session
         user = response.user
-        if not session or not user:
-            raise HTTPException(status_code=401, detail="Code exchange returned no session")
 
-        return {
-            "access_token": session.access_token,
-            "refresh_token": session.refresh_token,
-            "expires_at": session.expires_at,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "name": user.user_metadata.get("full_name", ""),
-                "avatar_url": user.user_metadata.get("avatar_url", ""),
-            },
-        }
+        if not session or not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Code exchange returned no session",
+            )
+
+        return _serialize_session(session, user)
+
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"[AUTH] Code exchange failed: {e}")
-        raise HTTPException(status_code=401, detail=f"Session exchange failed: {str(e)}")
+
+    except Exception as exc:
+        logger.error(
+            "[AUTH] OAuth code exchange failed",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=401,
+            detail=f"Session exchange failed: {str(exc)}",
+        ) from exc
 
 
-def refresh_session(refresh_token: str) -> dict:
-    """Refresh an expired access_token using the refresh_token."""
+def refresh_session(refresh_token: str) -> dict[str, Any]:
+    """Refresh the Supabase session using a refresh token."""
     supabase = get_supabase()
+
     try:
         response = supabase.auth.refresh_session(refresh_token)
+
         session = response.session
         user = response.user
-        if not session:
-            raise HTTPException(status_code=401, detail="Refresh returned no session")
 
-        return {
-            "access_token": session.access_token,
-            "refresh_token": session.refresh_token,
-            "expires_at": session.expires_at,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "name": user.user_metadata.get("full_name", ""),
-                "avatar_url": user.user_metadata.get("avatar_url", ""),
-            },
-        }
+        if not session:
+            raise HTTPException(
+                status_code=401,
+                detail="Refresh returned no session",
+            )
+
+        return _serialize_session(session, user)
+
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"[AUTH] Token refresh failed: {e}")
-        raise HTTPException(status_code=401, detail=f"Token refresh failed: {str(e)}")
+
+    except Exception as exc:
+        logger.error(
+            "[AUTH] Session refresh failed",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=401,
+            detail=f"Token refresh failed: {str(exc)}",
+        ) from exc
 
 
-def sign_out(access_token: str) -> dict:
-    """Revoke a session server-side."""
+def sign_out(access_token: str) -> dict[str, str]:
+    """
+    Attempt to revoke the Supabase session.
+
+    Preserves the existing behavior of returning signed_out even when
+    the server-side revocation attempt raises an exception.
+    """
     supabase = get_supabase()
+
     try:
         supabase.auth.admin.sign_out(access_token)
-    except Exception as e:
-        logger.warning(f"[AUTH] Sign-out notice: {e}")
+
+    except Exception:
+        logger.warning(
+            "[AUTH] Server-side sign-out failed",
+            exc_info=True,
+        )
+
     return {"status": "signed_out"}
 
-
-def get_current_user_info(request: Request) -> dict:
-    """Return the authenticated user's profile from the token."""
+def get_current_user_info(request: Request) -> dict[str, Any]:
+    """Return the authenticated user's public profile."""
     user = verify_user(request)
 
-    if isinstance(user, dict):
+    # Preserve the development bypass response: {"id": "dev_user"}.
+    if isinstance(user, dict) and "user_metadata" not in user:
         return user
 
-    return {
-        "id": user.id,
-        "email": user.email,
-        "name": getattr(user, "user_metadata", {}).get("full_name", ""),
-        "avatar_url": getattr(user, "user_metadata", {}).get("avatar_url", ""),
-    }
+    return _serialize_user(user)
 
-
-# ---------------------------------------------------------------------------
-# Terms & Conditions Acceptance (persisted in DB)
-# ---------------------------------------------------------------------------
-
-def check_terms_accepted(user_id: str, conn) -> bool:
-    """Check if a user has accepted the Terms & Conditions."""
+def check_terms_accepted(user_id: str, conn: Any) -> bool:
+    """Check whether a user has an acceptance record."""
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT accepted_at FROM terms_acceptance WHERE user_id = %s",
+                """
+                SELECT accepted_at
+                FROM terms_acceptance
+                WHERE user_id = %s
+                """,
                 (user_id,),
             )
             row = cur.fetchone()
-            return row is not None
-    except Exception as e:
-        logger.warning(f"[AUTH] Terms check failed: {e}")
+
+        return row is not None
+
+    except Exception:
+        logger.warning(
+            "[AUTH] Terms acceptance check failed",
+            exc_info=True,
+        )
         return False
 
 
-def accept_terms(user_id: str, conn) -> dict:
-    """Record that a user accepted the Terms & Conditions."""
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+def accept_terms(user_id: str, conn: Any) -> dict[str, str]:
+    """Persist the user's Terms & Conditions acceptance."""
+    accepted_at = datetime.datetime.now(
+        datetime.timezone.utc
+    ).isoformat()
+
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO terms_acceptance (user_id, accepted_at)
                 VALUES (%s, %s)
-                ON CONFLICT (user_id) DO UPDATE SET accepted_at = EXCLUDED.accepted_at;
+                ON CONFLICT (user_id)
+                DO UPDATE SET accepted_at = EXCLUDED.accepted_at;
                 """,
-                (user_id, now),
+                (user_id, accepted_at),
             )
-            conn.commit()
-        return {"status": "accepted", "accepted_at": now}
-    except Exception as e:
-        logger.error(f"[AUTH] Terms acceptance write failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Could not save acceptance: {str(e)}")
+
+        conn.commit()
+
+        return {
+            "status": "accepted",
+            "accepted_at": accepted_at,
+        }
+
+    except Exception as exc:
+        logger.error(
+            "[AUTH] Terms acceptance persistence failed",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not save acceptance: {str(exc)}",
+        ) from exc

@@ -1,11 +1,14 @@
 """FastAPI backend application for QuantPilot."""
 
-import sys
-import uuid
+import asyncio
 import datetime
+import json
 import logging
+import sys
+import threading
+import uuid
 from contextlib import asynccontextmanager
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 if sys.platform == "win32":
     try:
@@ -14,12 +17,9 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-import json
-import asyncio
-import threading
 from pydantic import BaseModel
 import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -76,6 +76,67 @@ app.add_middleware(
 
 # Register distributed routers
 app.include_router(auth_router)
+
+
+WELCOME_MESSAGE = (
+    "Hello! I am **QuantPilot**, your AI financial research and trading assistant.\n\n"
+    "Here is how I can assist you:\n"
+    '- **Live Quotes & Pricing**: *"What is the price of AAPL?"*\n'
+    '- **Technical Analysis & Trading Signals**: *"Should I buy TSLA?"*\n'
+    '- **Fundamentals & Financials**: *"Show me NVDA valuation and P/E ratio"*\n'
+    '- **Market News**: *"Latest news on Microsoft"*\n'
+    '- **Broker & Positions**: *"Check my account balance and open positions"*\n\n'
+    "What stock or market query would you like to explore today?"
+)
+
+GREETINGS = {
+    "hi", "hello", "hey", "hola", "yo", "sup", "good morning", "good evening",
+    "good afternoon", "hi there", "hello there", "who are you",
+    "what can you do", "help",
+}
+
+
+def _get_user_id(user) -> str:
+    """Return the authenticated user's ID for object- or dict-based auth results."""
+    return user.id if hasattr(user, "id") else user.get("id")
+
+
+def _is_greeting(query: str) -> bool:
+    """Check whether a query matches the supported greeting shortcuts."""
+    return query.strip().lower().rstrip("!?.") in GREETINGS
+
+
+def _verify_thread_access(thread_id: str, user_id: str) -> None:
+    """Verify thread ownership when storage is available; retain best-effort DB checks."""
+    try:
+        if check_db_availability():
+            conn = get_db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT user_id FROM threads WHERE id = %s",
+                        (thread_id,),
+                    )
+                    row = cur.fetchone()
+                    if row and row["user_id"] != user_id:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Cannot use another user's thread",
+                        )
+            finally:
+                release_db(conn)
+        else:
+            mem_thread = _memory_threads.get(thread_id)
+            if mem_thread and mem_thread.get("user_id") != user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Cannot use another user's thread",
+                )
+    except HTTPException:
+        raise
+    except Exception:
+        # Preserve the existing best-effort behavior when the DB check fails.
+        pass
 
 
 class StockRequest(BaseModel):
@@ -149,7 +210,7 @@ def filter_messages(messages):
 @app.get("/threads")
 def get_threads(user=Depends(verify_user)):
     """Retrieve all conversations for the user, ordered by latest activity."""
-    user_id = user.id if hasattr(user, "id") else user.get("id")
+    user_id = _get_user_id(user)
     try:
         conn = get_db()
         try:
@@ -169,7 +230,7 @@ def get_threads(user=Depends(verify_user)):
 @app.get("/threads/{thread_id}")
 def get_thread_history(thread_id: str, user=Depends(verify_user)):
     """Retrieve message history for a specific thread, ensuring ownership."""
-    user_id = user.id if hasattr(user, "id") else user.get("id")
+    user_id = _get_user_id(user)
     try:
         if check_db_availability():
             conn = get_db()
@@ -202,7 +263,7 @@ def get_thread_history(thread_id: str, user=Depends(verify_user)):
 @app.delete("/threads/{thread_id}")
 def delete_thread(thread_id: str, user=Depends(verify_user)):
     """Delete a thread and associated checkpoints."""
-    user_id = user.id if hasattr(user, "id") else user.get("id")
+    user_id = _get_user_id(user)
     
     # Check memory first
     mem_thread = _memory_threads.get(thread_id)
@@ -239,29 +300,10 @@ def delete_thread(thread_id: str, user=Depends(verify_user)):
 @app.post("/analyze")
 def analyze_stock(req: StockRequest, user=Depends(verify_user)):
     """Analyze query via LangGraph multi-agent orchestration."""
-    user_id = user.id if hasattr(user, "id") else user.get("id")
+    user_id = _get_user_id(user)
     
-    # Verify thread ownership if thread_id is provided
     if req.thread_id:
-        try:
-            if check_db_availability():
-                conn = get_db()
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT user_id FROM threads WHERE id = %s", (req.thread_id,))
-                        row = cur.fetchone()
-                        if row and row["user_id"] != user_id:
-                            raise HTTPException(status_code=403, detail="Cannot use another user's thread")
-                finally:
-                    release_db(conn)
-            else:
-                mem_thread = _memory_threads.get(req.thread_id)
-                if mem_thread and mem_thread.get("user_id") != user_id:
-                    raise HTTPException(status_code=403, detail="Cannot use another user's thread")
-        except HTTPException:
-            raise
-        except Exception:
-            pass # Ignore DB errors during auth check
+        _verify_thread_access(req.thread_id, user_id)
             
     thread_id = req.thread_id or str(uuid.uuid4())
     logger.info(f"[BACKEND] Query: {req.query} (thread: {thread_id}, user: {user_id})")
@@ -269,22 +311,9 @@ def analyze_stock(req: StockRequest, user=Depends(verify_user)):
     _upsert_thread(thread_id, req.query, user_id)
 
     # Fast-path for greetings to provide instantaneous response
-    clean_q = req.query.strip().lower().rstrip("!?.")
-    greetings = {
-        "hi", "hello", "hey", "hola", "yo", "sup", "good morning", "good evening",
-        "good afternoon", "hi there", "hello there", "who are you", "what can you do", "help"
-    }
-    if clean_q in greetings:
-        welcome_text = (
-            "Hello! I am **QuantPilot**, your AI financial research and trading assistant.\n\n"
-            "Here is how I can assist you:\n"
-            "- **Live Quotes & Pricing**: *\"What is the price of AAPL?\"*\n"
-            "- **Technical Analysis & Trading Signals**: *\"Should I buy TSLA?\"*\n"
-            "- **Fundamentals & Financials**: *\"Show me NVDA valuation and P/E ratio\"*\n"
-            "- **Market News**: *\"Latest news on Microsoft\"*\n"
-            "- **Broker & Positions**: *\"Check my account balance and open positions\"*\n\n"
-            "What stock or market query would you like to explore today?"
-        )
+    is_greeting = _is_greeting(req.query)
+    if is_greeting:
+        welcome_text = WELCOME_MESSAGE
         return {
             "response": welcome_text,
             "thread_id": thread_id
@@ -321,40 +350,17 @@ def analyze_stock(req: StockRequest, user=Depends(verify_user)):
 @app.post("/analyze/stream")
 async def analyze_stock_stream(req: StockRequest, user=Depends(verify_user)):
     """Analyze query with progressive SSE streaming, speculative acknowledgment and market trivia."""
-    user_id = user.id if hasattr(user, "id") else user.get("id")
+    user_id = _get_user_id(user)
 
-    # Verify thread ownership if thread_id is provided
     if req.thread_id:
-        try:
-            if check_db_availability():
-                conn = get_db()
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT user_id FROM threads WHERE id = %s", (req.thread_id,))
-                        row = cur.fetchone()
-                        if row and row["user_id"] != user_id:
-                            raise HTTPException(status_code=403, detail="Cannot use another user's thread")
-                finally:
-                    release_db(conn)
-            else:
-                mem_thread = _memory_threads.get(req.thread_id)
-                if mem_thread and mem_thread.get("user_id") != user_id:
-                    raise HTTPException(status_code=403, detail="Cannot use another user's thread")
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+        _verify_thread_access(req.thread_id, user_id)
 
     thread_id = req.thread_id or str(uuid.uuid4())
     logger.info(f"[BACKEND STREAM] Query: {req.query} (thread: {thread_id}, user: {user_id})")
 
     _upsert_thread(thread_id, req.query, user_id)
 
-    clean_q = req.query.strip().lower().rstrip("!?.")
-    greetings = {
-        "hi", "hello", "hey", "hola", "yo", "sup", "good morning", "good evening",
-        "good afternoon", "hi there", "hello there", "who are you", "what can you do", "help"
-    }
+    is_greeting = _is_greeting(req.query)
 
     async def event_generator():
         # 1. Immediate speculative acknowledgment & trivia (< 50ms)
@@ -365,17 +371,8 @@ async def analyze_stock_stream(req: StockRequest, user=Depends(verify_user)):
 
         yield f"data: {json.dumps({'type': 'ack', 'thread_id': thread_id, 'symbol': sym, 'name': name, 'fact': fact})}\n\n"
 
-        if clean_q in greetings:
-            welcome_text = (
-                "Hello! I am **QuantPilot**, your AI financial research and trading assistant.\n\n"
-                "Here is how I can assist you:\n"
-                "- **Live Quotes & Pricing**: *\"What is the price of AAPL?\"*\n"
-                "- **Technical Analysis & Trading Signals**: *\"Should I buy TSLA?\"*\n"
-                "- **Fundamentals & Financials**: *\"Show me NVDA valuation and P/E ratio\"*\n"
-                "- **Market News**: *\"Latest news on Microsoft\"*\n"
-                "- **Broker & Positions**: *\"Check my account balance and open positions\"*\n\n"
-                "What stock or market query would you like to explore today?"
-            )
+        if is_greeting:
+            welcome_text = WELCOME_MESSAGE
             words = welcome_text.split(" ")
             for i, word in enumerate(words):
                 chunk = word + (" " if i < len(words) - 1 else "")
