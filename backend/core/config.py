@@ -94,6 +94,21 @@ class Settings:
     alpaca_paper: bool = field(
         default_factory=lambda: os.getenv("ALPACA_PAPER", "true").lower() == "true"
     )
+    alpaca_client_id: str = field(
+        default_factory=lambda: os.getenv("ALPACA_CLIENT_ID", "").strip()
+    )
+    alpaca_client_secret: str = field(
+        default_factory=lambda: os.getenv("ALPACA_CLIENT_SECRET", "").strip()
+    )
+    alpaca_redirect_uri: str = field(
+        default_factory=lambda: os.getenv("ALPACA_REDIRECT_URI", "").strip()
+    )
+    alpaca_oauth_scopes: str = field(
+        default_factory=lambda: os.getenv("ALPACA_OAUTH_SCOPES", "trading").strip()
+    )
+    alpaca_token_encryption_key: str = field(
+        default_factory=lambda: os.getenv("ALPACA_TOKEN_ENCRYPTION_KEY", "").strip()
+    )
 
     # Trading Safety Limits
     max_shares_per_order: int = 100

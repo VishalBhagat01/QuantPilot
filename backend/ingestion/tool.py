@@ -638,21 +638,29 @@ def predict_stock_signal(symbol: str):
 
 @tool
 def get_broker_account():
-    """Get the current Alpaca trading account information."""
-    from backend.trading.broker import get_account_info
-    return get_account_info()
+    """Get broker account information.
+
+    Broker access is intentionally exposed through authenticated REST
+    endpoints so the request's Supabase user can select the correct
+    per-user Alpaca connection.
+    """
+    return {"error": "Use the authenticated /trading/account endpoint."}
 
 
 @tool
 def get_broker_positions():
-    """Get all current open positions from the Alpaca broker."""
-    from backend.trading.broker import get_positions
-    return get_positions()
+    """Get all current open positions from the authenticated broker account."""
+    return {"error": "Use the authenticated /trading/positions endpoint."}
 
 
 @tool
 def place_trade(symbol: str, qty: int, side: str, order_type: str = "market"):
-    """Place a trade order via the Alpaca broker (paper trading by default)."""
+    """Place a trade order.
+
+    Order mutations require an authenticated user-scoped execution endpoint;
+    the AI tool cannot safely infer which connected account should be used.
+    """
+    return {"error": "Order placement requires an authenticated user-scoped endpoint."}
     from backend.trading.broker import place_order
     return place_order(symbol=symbol, qty=qty, side=side, order_type=order_type)
 

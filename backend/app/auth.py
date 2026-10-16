@@ -1,4 +1,3 @@
-
 """
 Backend Authentication Module.
 
@@ -57,7 +56,7 @@ def _serialize_user(user: Any) -> dict[str, Any]:
         user_id = user.get("id")
         email = user.get("email")
     else:
-        user_id = user.id
+        user_id = user.id 
         email = user.email
 
     metadata = _get_user_metadata(user)

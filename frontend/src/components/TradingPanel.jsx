@@ -21,6 +21,7 @@ import {
   ChevronRight,
   CheckCircle2
 } from 'lucide-react';
+import { disconnectAlpaca, getAlpacaConnectUrl, getAlpacaStatus, getAuthHeaders } from '../authApi';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -38,6 +39,8 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('scanner');
   const [lastRefreshed, setLastRefreshed] = useState(null);
+  const [alpacaStatus, setAlpacaStatus] = useState(null);
+  const [connectingAlpaca, setConnectingAlpaca] = useState(false);
 
   // Auto-scan when navigated here with an initialSymbol
   useEffect(() => {
@@ -51,15 +54,19 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
     fetchTradingData();
   }, []);
 
+  useEffect(() => {
+    getAlpacaStatus().then(setAlpacaStatus).catch(() => setAlpacaStatus({ connected: false }));
+  }, []);
+
   async function fetchTradingData() {
     setLoading(true);
     setError(null);
 
     try {
       const [accRes, posRes, ordRes] = await Promise.allSettled([
-        fetch(`${API}/trading/account`),
-        fetch(`${API}/trading/positions`),
-        fetch(`${API}/trading/orders`),
+        fetch(`${API}/trading/account`, { headers: getAuthHeaders() }),
+        fetch(`${API}/trading/positions`, { headers: getAuthHeaders() }),
+        fetch(`${API}/trading/orders`, { headers: getAuthHeaders() }),
       ]);
 
       if (accRes.status === 'fulfilled' && accRes.value.ok) {
@@ -77,6 +84,28 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
       setError('Failed to connect to trading backend. Check if the server is running.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function connectAlpaca() {
+    setConnectingAlpaca(true);
+    try {
+      window.location.assign(await getAlpacaConnectUrl());
+    } catch (e) {
+      setError('Unable to start Alpaca connection. Check the backend configuration.');
+      setConnectingAlpaca(false);
+    }
+  }
+
+  async function disconnectAlpacaAccount() {
+    try {
+      const status = await disconnectAlpaca();
+      setAlpacaStatus(status);
+      setAccount(null);
+      setPositions([]);
+      setOrders([]);
+    } catch (e) {
+      setError('Unable to disconnect the Alpaca account.');
     }
   }
 
@@ -176,6 +205,22 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
               <RefreshCw size={13} className={loading ? 'animate-spin text-[var(--color-quant-orange)]' : 'text-[var(--text-secondary)]'} />
               <span>SYNC BROKER</span>
             </button>
+            {alpacaStatus?.connected ? (
+              <button
+                onClick={disconnectAlpacaAccount}
+                className="px-3.5 py-2 bg-[var(--bg-surface)] hover:bg-red-500/10 border border-[var(--border-subtle)] rounded-xl text-xs font-bold tracking-wider text-[var(--text-secondary)] transition-all"
+              >
+                DISCONNECT ALPACA
+              </button>
+            ) : (
+              <button
+                onClick={connectAlpaca}
+                disabled={connectingAlpaca}
+                className="px-3.5 py-2 bg-[var(--color-quant-orange)] hover:opacity-90 rounded-xl text-xs font-bold tracking-wider text-black transition-all disabled:opacity-50"
+              >
+                {connectingAlpaca ? 'CONNECTING...' : 'CONNECT ALPACA PAPER'}
+              </button>
+            )}
           </div>
         </div>
 

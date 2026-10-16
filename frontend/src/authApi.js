@@ -37,6 +37,32 @@ export function getStoredUser() {
   }
 }
 
+export function getAuthHeaders() {
+    const { accessToken } = getStoredTokens();
+    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+}
+
+export async function getAlpacaConnectUrl() {
+    const res = await axios.get(`${API_BASE}/auth/alpaca/connect`, {
+      headers: getAuthHeaders(),
+    });
+    return res.data.url;
+}
+
+export async function getAlpacaStatus() {
+    const res = await axios.get(`${API_BASE}/auth/alpaca/status`, {
+      headers: getAuthHeaders(),
+    });
+    return res.data;
+}
+
+export async function disconnectAlpaca() {
+    const res = await axios.delete(`${API_BASE}/auth/alpaca`, {
+      headers: getAuthHeaders(),
+    });
+    return res.data;
+}
+
 export function storeSession({ access_token, refresh_token, user }) {
   if (access_token) localStorage.setItem(TOKEN_KEY, access_token);
   if (refresh_token) localStorage.setItem(REFRESH_KEY, refresh_token);

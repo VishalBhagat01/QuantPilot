@@ -4,6 +4,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from backend.core.config import settings
+from backend.trading.alpaca_oauth import request as user_request
 
 logger = logging.getLogger(__name__)
 
@@ -215,3 +216,52 @@ def get_recent_orders(limit: int = 10) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"[BROKER] Failed to get orders: {e}")
         return [{"error": str(e)}]
+
+
+def get_user_account_info(user_id: str) -> Dict[str, Any]:
+    account = user_request(user_id, "GET", "/v2/account")
+    return {
+        "status": account.get("status"),
+        "cash": float(account.get("cash", 0)),
+        "buying_power": float(account.get("buying_power", 0)),
+        "equity": float(account.get("equity", 0)),
+        "portfolio_value": float(account.get("portfolio_value", 0)),
+        "currency": account.get("currency"),
+        "paper": True,
+        "day_trade_count": int(account.get("daytrade_count", 0)),
+    }
+
+
+def get_user_positions(user_id: str) -> List[Dict[str, Any]]:
+    positions = user_request(user_id, "GET", "/v2/positions")
+    return [
+        {
+            "symbol": position.get("symbol"),
+            "qty": float(position.get("qty", 0)),
+            "side": position.get("side"),
+            "market_value": float(position.get("market_value", 0)),
+            "avg_entry_price": float(position.get("avg_entry_price", 0)),
+            "current_price": float(position.get("current_price", 0)),
+            "unrealized_pl": float(position.get("unrealized_pl", 0)),
+            "unrealized_pl_pct": float(position.get("unrealized_plpc", 0)),
+        }
+        for position in positions
+    ]
+
+
+def get_user_recent_orders(user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    orders = user_request(user_id, "GET", "/v2/orders", params={"status": "all", "limit": limit})
+    return [
+        {
+            "order_id": order.get("id"),
+            "symbol": order.get("symbol"),
+            "qty": order.get("qty"),
+            "side": order.get("side"),
+            "type": order.get("type"),
+            "status": order.get("status"),
+            "submitted_at": order.get("submitted_at"),
+            "filled_at": order.get("filled_at"),
+            "filled_avg_price": order.get("filled_avg_price"),
+        }
+        for order in orders
+    ]

@@ -119,5 +119,25 @@ def init_db():
                 );
             """)
             conn.commit()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS alpaca_oauth_states (
+                    state TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    expires_at TIMESTAMP NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_alpaca_oauth_states_expiry
+                    ON alpaca_oauth_states (expires_at);
+                CREATE TABLE IF NOT EXISTS alpaca_connections (
+                    user_id TEXT PRIMARY KEY,
+                    access_token TEXT NOT NULL,
+                    refresh_token TEXT,
+                    environment TEXT NOT NULL CHECK (environment = 'paper'),
+                    expires_at TIMESTAMP,
+                    revoked_at TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            conn.commit()
                 
             logger.info("[DB] Threads table and index ensured.")

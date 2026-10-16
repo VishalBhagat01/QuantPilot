@@ -30,7 +30,12 @@ from backend.core.market_facts import detect_query_subject
 from backend.agents.stock_agent import graph
 from backend.db.db import get_db, release_db, init_db, check_db_availability
 from backend.ingestion.tool import fetch_stock_dashboard_data, predict_stock_signal
-from backend.trading.broker import get_account_info, get_positions, get_recent_orders
+from backend.trading.broker import (
+    get_user_account_info,
+    get_user_positions,
+    get_user_recent_orders,
+)
+from backend.trading.alpaca_oauth import get_connection
 from backend.app.auth import verify_user
 from backend.app.auth_router import router as auth_router
 
@@ -206,6 +211,11 @@ def filter_messages(messages):
 
     return filtered
 
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint to verify service availability."""
+    return {"status": "Healthy", "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()}
 
 @app.get("/threads")
 def get_threads(user=Depends(verify_user)):
@@ -499,7 +509,8 @@ def get_dashboard_data(req: Dict[str, str], user=Depends(verify_user)):
 def get_trading_account(user=Depends(verify_user)):
     """Return Alpaca trading account details."""
     try:
-        return get_account_info()
+        user_id = _get_user_id(user)
+        return get_user_account_info(user_id)
     except Exception as e:
         logger.error(f"[ERROR] Trading account fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -509,7 +520,8 @@ def get_trading_account(user=Depends(verify_user)):
 def get_trading_positions(user=Depends(verify_user)):
     """Return all open Alpaca positions."""
     try:
-        return get_positions()
+        user_id = _get_user_id(user)
+        return get_user_positions(user_id)
     except Exception as e:
         logger.error(f"[ERROR] Positions fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -562,7 +574,8 @@ def scan_chart_patterns(symbol: str, user=Depends(verify_user)):
 def get_trading_orders(user=Depends(verify_user)):
     """Return recent Alpaca orders."""
     try:
-        return get_recent_orders(limit=10)
+        user_id = _get_user_id(user)
+        return get_user_recent_orders(user_id, limit=10)
     except Exception as e:
         logger.error(f"[ERROR] Orders fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

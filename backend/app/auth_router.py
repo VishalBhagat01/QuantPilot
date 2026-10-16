@@ -6,6 +6,7 @@ clean REST endpoints consumed by the frontend thin-client.
 """
 
 from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -18,8 +19,15 @@ from backend.app.auth import (
     get_current_user_info,
     check_terms_accepted,
     accept_terms,
+    FRONTEND_URL,
 )
 from backend.db.db import get_db, release_db, check_db_availability
+from backend.trading.alpaca_oauth import (
+    create_authorization,
+    disconnect,
+    exchange_code,
+    get_connection,
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -34,6 +42,11 @@ class RefreshRequest(BaseModel):
 
 class SignOutRequest(BaseModel):
     access_token: Optional[str] = None
+
+
+class AlpacaCallbackRequest(BaseModel):
+    code: str
+    state: str
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +77,37 @@ def token_refresh(req: RefreshRequest):
     [PUBLIC] Refresh an expired access_token using the refresh_token.
     """
     return refresh_session(req.refresh_token)
+
+
+@router.get("/alpaca/connect")
+def alpaca_connect(user=Depends(verify_user)):
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+    return {"url": create_authorization(user_id)}
+
+
+@router.get("/alpaca/callback")
+def alpaca_callback(code: str, state: str):
+    try:
+        exchange_code(code, state)
+        return RedirectResponse(url=f"{FRONTEND_URL}/?alpaca=connected", status_code=303)
+    except (ValueError, RuntimeError) as exc:
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/?alpaca=error",
+            status_code=303,
+        )
+
+
+@router.get("/alpaca/status")
+def alpaca_status(user=Depends(verify_user)):
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+    return get_connection(user_id) or {"connected": False, "environment": "paper"}
+
+
+@router.delete("/alpaca")
+def alpaca_disconnect(user=Depends(verify_user)):
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+    disconnect(user_id)
+    return {"connected": False, "environment": "paper"}
 
 
 # ---------------------------------------------------------------------------
