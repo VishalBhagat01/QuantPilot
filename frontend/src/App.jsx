@@ -2,8 +2,6 @@ import { useState, useRef, useEffect } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import axios from "axios"
 import ReactMarkdown from 'react-markdown'
-import Auth from './components/Auth'
-import TermsGate from './components/TermsGate'
 import { 
   initializeAuth, 
   onAuthStateChange, 
@@ -12,7 +10,6 @@ import {
   clearSession,
   checkTermsAccepted,
   acceptTerms,
-  getStoredUser
 } from './authApi'
 import { 
   Send, 
@@ -39,8 +36,11 @@ import {
 } from 'lucide-react'
 import Sidebar from "./components/Sidebar"
 import StockCard from "./components/StockCard"
-import TradingPanel from "./components/TradingPanel"
 import Logo from "./components/Logo"
+import TradingPage from "./pages/TradingPage"
+import AuthPage from "./pages/AuthPage"
+import TermsPage from "./pages/TermsPage"
+import { useTheme } from "./hooks/useTheme"
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
 
@@ -52,7 +52,7 @@ export default function App() {
   const [messages, setMessages] = useState([
     { 
       role: "assistant", 
-      content: "Welcome to **QuantPilot AI**. I am your institutional financial intelligence assistant. Ask me for real-time market data, technical indicator analysis, YOLOv8 chart pattern scans, or simulated trade execution." 
+      content: "Welcome to **QuantPilot AI**. I am your institutional financial intelligence assistant. Ask me for real-time market data, technical indicator analysis, rule-based market scans, or simulated trade execution."
     }
   ])
   const [threads, setThreads] = useState([])
@@ -62,11 +62,7 @@ export default function App() {
   const [activeView, setActiveView] = useState('chat')
   const [selectedTradeSymbol, setSelectedTradeSymbol] = useState('')
   const [copiedIdx, setCopiedIdx] = useState(null)
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('quantpilot_theme')
-    if (saved) return saved === 'dark'
-    return true // Default dark mode
-  })
+  const { isDarkMode, toggleTheme } = useTheme()
   
   const chatEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -105,7 +101,7 @@ export default function App() {
     init()
 
     // Listen for OAuth redirects handled by Supabase SDK
-    const unsubscribe = onAuthStateChange(async (userData, session) => {
+    const unsubscribe = onAuthStateChange(async (userData) => {
       if (userData) {
         setUser(userData)
         
@@ -130,19 +126,6 @@ export default function App() {
 
     return () => unsubscribe()
   }, [])
-
-  // ── Theme Management ──
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.remove('light')
-      document.documentElement.classList.add('dark')
-      localStorage.setItem('quantpilot_theme', 'dark')
-    } else {
-      document.documentElement.classList.add('light')
-      document.documentElement.classList.remove('dark')
-      localStorage.setItem('quantpilot_theme', 'light')
-    }
-  }, [isDarkMode])
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -170,7 +153,7 @@ export default function App() {
       setMessages([
         { 
           role: "assistant", 
-          content: "Welcome to **QuantPilot AI**. I am your institutional financial intelligence assistant. Ask me for real-time market data, technical indicator analysis, YOLOv8 chart pattern scans, or simulated trade execution." 
+          content: "Welcome to **QuantPilot AI**. I am your institutional financial intelligence assistant. Ask me for real-time market data, technical indicator analysis, rule-based market scans, or simulated trade execution."
         }
       ])
     }
@@ -198,7 +181,7 @@ export default function App() {
         ]);
       }
     }
-  }, [location.pathname, user, termsAccepted]);
+  }, [location.pathname, user, termsAccepted, activeThreadId]);
 
   const loadThreadData = async (id) => {
     // If we already have the messages in cache, show them instantly
@@ -489,12 +472,12 @@ export default function App() {
 
   // ── Show Login if No User ──
   if (!user) {
-    return <Auth />
+    return <AuthPage />
   }
 
   // ── Show Terms Gate if Terms Not Accepted ──
   if (!termsAccepted) {
-    return <TermsGate onAccept={handleTermsAccepted} onDecline={handleSignOut} />
+    return <TermsPage onAccept={handleTermsAccepted} onDecline={handleSignOut} />
   }
 
   return (
@@ -571,7 +554,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <button 
               className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--text-primary)] bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] border-2 border-[var(--border-subtle)] shadow-[var(--shadow-sm)] transition-colors cursor-pointer"
-              onClick={() => setIsDarkMode(!isDarkMode)}
+              onClick={toggleTheme}
               title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
               aria-label="Toggle Theme"
             >
@@ -601,7 +584,7 @@ export default function App() {
         <div className="flex-1 relative overflow-hidden">
           {activeView === 'trading' ? (
             <div className="h-full overflow-hidden animate-in fade-in duration-300">
-              <TradingPanel 
+              <TradingPage
                 initialSymbol={selectedTradeSymbol} 
                 onAskAI={(prompt) => {
                   setActiveView('chat')
@@ -623,7 +606,7 @@ export default function App() {
                       Financial Intelligence
                     </h1>
                     <p className="font-mono text-sm sm:text-base text-[var(--text-secondary)] max-w-lg leading-relaxed mb-10">
-                      Real-time equity intelligence, level-1 broker feeds, YOLOv8 chart pattern detection, and autonomous trading orchestration.
+                      Real-time equity intelligence, level-1 broker feeds, explainable technical scanning, and autonomous trading orchestration.
                     </p>
                   </div>
                 )}

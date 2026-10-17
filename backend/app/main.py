@@ -29,15 +29,10 @@ from backend.core.config import settings
 from backend.core.market_facts import detect_query_subject
 from backend.agents.stock_agent import graph
 from backend.db.db import get_db, release_db, init_db, check_db_availability
-from backend.ingestion.tool import fetch_stock_dashboard_data, predict_stock_signal
-from backend.trading.broker import (
-    get_user_account_info,
-    get_user_positions,
-    get_user_recent_orders,
-)
-from backend.trading.alpaca_oauth import get_connection
+from backend.ingestion.tool import fetch_stock_dashboard_data
 from backend.app.auth import verify_user
 from backend.app.auth_router import router as auth_router
+from backend.app.routers.trading import router as trading_router
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +76,7 @@ app.add_middleware(
 
 # Register distributed routers
 app.include_router(auth_router)
+app.include_router(trading_router)
 
 
 WELCOME_MESSAGE = (
@@ -334,7 +330,8 @@ def analyze_stock(req: StockRequest, user=Depends(verify_user)):
     try:
         result = graph.invoke({
             "messages": [HumanMessage(content=req.query)],
-            "loop_count": 0
+            "loop_count": 0,
+            "user_id": user_id,
         }, config=config)
 
         filtered = filter_messages(result["messages"])
@@ -400,7 +397,11 @@ async def analyze_stock_stream(req: StockRequest, user=Depends(verify_user)):
             try:
                 config = {"configurable": {"thread_id": thread_id}}
                 for chunk in graph.stream(
-                    {"messages": [HumanMessage(content=req.query)], "loop_count": 0},
+                    {
+                        "messages": [HumanMessage(content=req.query)],
+                        "loop_count": 0,
+                        "user_id": user_id,
+                    },
                     config=config,
                     stream_mode="updates"
                 ):
@@ -498,84 +499,4 @@ def get_dashboard_data(req: Dict[str, str], user=Depends(verify_user)):
         return fetch_stock_dashboard_data(symbol, timeframe=range_param)
     except Exception as e:
         logger.error(f"[ERROR] Dashboard fetch failed for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------------------------------------------------------
-# Trading Terminal Endpoints
-# ---------------------------------------------------------------------------
-
-@app.get("/trading/account")
-def get_trading_account(user=Depends(verify_user)):
-    """Return Alpaca trading account details."""
-    try:
-        user_id = _get_user_id(user)
-        return get_user_account_info(user_id)
-    except Exception as e:
-        logger.error(f"[ERROR] Trading account fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/trading/positions")
-def get_trading_positions(user=Depends(verify_user)):
-    """Return all open Alpaca positions."""
-    try:
-        user_id = _get_user_id(user)
-        return get_user_positions(user_id)
-    except Exception as e:
-        logger.error(f"[ERROR] Positions fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/trading/scan/{symbol}")
-def scan_chart_patterns(symbol: str, user=Depends(verify_user)):
-    """
-    Run technical analysis and chart pattern scan for a stock.
-    Returns signal, confidence, indicators, and detected patterns.
-    """
-    clean_sym = symbol.strip().upper()
-    if not clean_sym:
-        raise HTTPException(status_code=400, detail="Invalid ticker symbol")
-
-    try:
-        tech_result = predict_stock_signal.invoke({"symbol": clean_sym})
-
-        patterns_list = []
-        try:
-            from backend.pattern_detection.pattern_detector import analyze_chart
-            chart_res = analyze_chart(clean_sym, period="3mo", cleanup_image=True)
-            if chart_res and chart_res.patterns:
-                patterns_list = [
-                    {"name": p.name, "confidence": round(p.confidence * 100, 1)}
-                    for p in chart_res.patterns
-                ]
-        except Exception as e:
-            logger.info(f"[SCAN] Pattern detection skipped: {e}")
-
-        raw_conf = tech_result.get("confidence_raw", 50)
-        signal = tech_result.get("signal", "HOLD")
-
-        return {
-            "symbol": clean_sym,
-            "signal": signal,
-            "confidence": f"{raw_conf}%",
-            "signal_confidence": raw_conf,
-            "reasoning": tech_result.get("reasoning", ""),
-            "indicators": tech_result.get("indicators", {}),
-            "patterns": patterns_list,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }
-    except Exception as e:
-        logger.error(f"[ERROR] Trading scan failed for {clean_sym}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/trading/orders")
-def get_trading_orders(user=Depends(verify_user)):
-    """Return recent Alpaca orders."""
-    try:
-        user_id = _get_user_id(user)
-        return get_user_recent_orders(user_id, limit=10)
-    except Exception as e:
-        logger.error(f"[ERROR] Orders fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

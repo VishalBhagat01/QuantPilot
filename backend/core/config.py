@@ -72,10 +72,6 @@ class Settings:
     groq_api_key: str = field(
         default_factory=lambda: os.getenv("GROQ_API_KEY", "").strip()
     )
-    huggingfacehub_api_token: str = field(
-        default_factory=lambda: os.getenv("HUGGINGFACEHUB_API_TOKEN", "").strip()
-    )
-
     # Market Data API Keys
     finnhub_api_key: str = field(
         default_factory=lambda: os.getenv("FINNHUB_API_KEY", "").strip()

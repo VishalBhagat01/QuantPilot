@@ -40,16 +40,9 @@ cryptography
 pandas                        # Dataframes and indicator calculations
 numpy                         # Numerical computations
 matplotlib                    # Chart rendering
-mplfinance                    # Candlestick financial charting
-Pillow                        # Image processing
 yfinance                      # Real-time and historical OHLCV data
 
 # =============================================
-# Chart Pattern Detection (Computer Vision)
-# =============================================
-ultralytics                   # YOLOv8 object detection engine
-huggingface-hub               # Download pattern model weights
-
 # =============================================
 # Alpaca Broker Integration
 # =============================================

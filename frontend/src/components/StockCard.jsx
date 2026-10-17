@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { 
     TrendingUp, 
@@ -15,6 +15,8 @@ import {
     Cpu
 } from 'lucide-react';
 import StockChart from './StockChart';
+import { getAuthHeaders } from '../authApi';
+import { API_BASE } from '../lib/apiClient';
 
 const StockCard = ({ symbol, onTrade }) => {
     const [data, setData] = useState(null);
@@ -25,7 +27,7 @@ const StockCard = ({ symbol, onTrade }) => {
     const [expanded, setExpanded] = useState(false);
     const cacheRef = useRef({});
 
-    const fetchRangeData = async (rangeToFetch) => {
+    const fetchRangeData = useCallback(async (rangeToFetch) => {
         if (!symbol) return;
         
         // Instant response from component-level memory cache
@@ -36,11 +38,10 @@ const StockCard = ({ symbol, onTrade }) => {
 
         try {
             setRangeLoading(true);
-            const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
             const response = await axios.post(`${API_BASE}/agent/stock`, { 
                 symbol, 
                 range: rangeToFetch 
-            });
+            }, { headers: getAuthHeaders() });
             if (response.data) {
                 cacheRef.current[rangeToFetch] = response.data;
                 setData(response.data);
@@ -48,19 +49,19 @@ const StockCard = ({ symbol, onTrade }) => {
             }
         } catch (err) {
             console.error("Error switching timeframe:", err);
-            if (!data) setError("Could not load asset intelligence.");
+            setError("Could not load asset intelligence.");
         } finally {
             setRangeLoading(false);
             setLoading(false);
         }
-    };
+    }, [symbol]);
 
     useEffect(() => {
         cacheRef.current = {};
         setActiveRange('1D');
         setLoading(true);
         fetchRangeData('1D');
-    }, [symbol]);
+    }, [symbol, fetchRangeData]);
 
     const handleRangeChange = (newRange) => {
         if (newRange === activeRange || rangeLoading) return;

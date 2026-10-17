@@ -162,6 +162,7 @@ class AgentState(TypedDict):
     next_step: str
     feedback: str
     loop_count: int
+    user_id: Optional[str]
 
 
 def _get_text(content) -> str:
@@ -201,7 +202,9 @@ def analyst_node(state: AgentState):
          "3. When discussing a specific stock, end your response with: DASHBOARD:TICKER\n"
          "4. When the user asks whether to buy/sell, ALWAYS call predict_stock_signal FIRST.\n"
          "5. ALWAYS check get_broker_account to verify buying power before placing a BUY order.\n"
-         "6. If the user greeting you (e.g. 'hi', 'hello', 'hey'), reply politely and briefly without calling market tools.\n"
+         "6. If the user explicitly asks to place a paper trade, call place_trade after checking buying power. "
+         "Do not merely provide an order preview when an authenticated broker connection is available.\n"
+         "7. If the user greeting you (e.g. 'hi', 'hello', 'hey'), reply politely and briefly without calling market tools.\n"
          f"{feedback_section}"
          f"{force_section}"
         ),
@@ -277,7 +280,21 @@ def tool_node(state: AgentState):
             )
 
         try:
-            res = tool_map[tool_name].invoke(tool_args)
+            user_id = state.get("user_id")
+            if tool_name == "get_broker_account" and user_id:
+                from backend.trading.broker import get_user_account_info
+                res = get_user_account_info(user_id)
+            elif tool_name == "get_broker_positions" and user_id:
+                from backend.trading.broker import get_user_positions
+                res = get_user_positions(user_id)
+            elif tool_name == "place_trade" and user_id:
+                from backend.trading.broker import place_user_order
+                res = place_user_order(user_id=user_id, **tool_args)
+            elif tool_name == "close_trade" and user_id:
+                from backend.trading.alpaca_oauth import request as user_request
+                res = user_request(user_id, "DELETE", f"/v2/positions/{tool_args['symbol'].strip().upper()}")
+            else:
+                res = tool_map[tool_name].invoke(tool_args)
             res_str = json.dumps(res, default=str) if not isinstance(res, str) else res
             if len(res_str) > 4000:
                 res_str = res_str[:3900] + "\n... [truncated, showing first 3900 chars]"

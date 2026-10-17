@@ -193,15 +193,112 @@ def access_token(user_id: str) -> str:
         raise RuntimeError("Stored Alpaca connection cannot be decrypted.") from exc
 
 
+def _stored_tokens(user_id: str) -> tuple[str, str | None]:
+    """Return decrypted access and refresh tokens for a paper connection."""
+    with db_session() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT access_token, refresh_token, environment, revoked_at
+                FROM alpaca_connections
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+
+    if not row or row["revoked_at"] is not None or row["environment"] != "paper":
+        raise RuntimeError("Connect an Alpaca paper account before using trading features.")
+    try:
+        cipher = _fernet()
+        access = cipher.decrypt(row["access_token"].encode()).decode()
+        refresh = (
+            cipher.decrypt(row["refresh_token"].encode()).decode()
+            if row["refresh_token"]
+            else None
+        )
+        return access, refresh
+    except (InvalidToken, UnicodeDecodeError) as exc:
+        raise RuntimeError("Stored Alpaca connection cannot be decrypted.") from exc
+
+
+def _refresh_access_token(user_id: str, refresh_token: str) -> str:
+    """Refresh and persist a rotated Alpaca OAuth token."""
+    if not settings.alpaca_client_id or not settings.alpaca_client_secret:
+        raise RuntimeError("Alpaca OAuth client credentials are not configured.")
+
+    response = requests.post(
+        "https://api.alpaca.markets/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": settings.alpaca_client_id,
+            "client_secret": settings.alpaca_client_secret,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=settings.http_timeout,
+    )
+    if not response.ok:
+        logger.warning("[ALPACA] Token refresh failed: status=%s", response.status_code)
+        raise RuntimeError("Alpaca authorization expired or was revoked. Reconnect your account.")
+
+    payload = response.json()
+    new_access = payload.get("access_token")
+    new_refresh = payload.get("refresh_token") or refresh_token
+    if not new_access:
+        raise RuntimeError("Alpaca token refresh returned no access token. Reconnect your account.")
+
+    expires_at = None
+    if payload.get("expires_in"):
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(payload["expires_in"]))
+
+    cipher = _fernet()
+    with db_session() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE alpaca_connections
+                SET access_token = %s,
+                    refresh_token = %s,
+                    expires_at = %s,
+                    revoked_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s AND environment = 'paper'
+                """,
+                (
+                    cipher.encrypt(new_access.encode()).decode(),
+                    cipher.encrypt(new_refresh.encode()).decode() if new_refresh else None,
+                    expires_at,
+                    user_id,
+                ),
+            )
+        conn.commit()
+    logger.info("[ALPACA] Refreshed paper OAuth token for user %s", user_id)
+    return new_access
+
+
 def request(user_id: str, method: str, path: str, **kwargs: Any) -> Any:
-    token = access_token(user_id)
+    token, refresh_token = _stored_tokens(user_id)
+    request_kwargs = dict(kwargs)
+    headers = dict(request_kwargs.pop("headers", {}))
+    headers["Authorization"] = f"Bearer {token}"
     response = requests.request(
         method,
         f"https://paper-api.alpaca.markets{path}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         timeout=settings.http_timeout,
-        **kwargs,
+        **request_kwargs,
     )
+    if response.status_code == 401 and refresh_token:
+        token = _refresh_access_token(user_id, refresh_token)
+        headers["Authorization"] = f"Bearer {token}"
+        response = requests.request(
+            method,
+            f"https://paper-api.alpaca.markets{path}",
+            headers=headers,
+            timeout=settings.http_timeout,
+            **request_kwargs,
+        )
     if response.status_code in (401, 403):
         raise RuntimeError("Alpaca authorization expired or was revoked. Reconnect your account.")
     if not response.ok:

@@ -1,6 +1,6 @@
 # 📊 QuantPilot — AI Financial Research & Algorithmic Trading Platform
 
-QuantPilot is a modular, high-performance financial intelligence system combining multi-agent LLM orchestration (LangGraph), computer vision chart pattern detection (YOLOv8), technical indicator analysis, and automated paper trading (Alpaca Markets).
+QuantPilot is a modular, high-performance financial intelligence system combining multi-agent LLM orchestration (LangGraph), a local rule-based market scanner, technical indicator analysis, and automated paper trading (Alpaca Markets).
 
 ---
 
@@ -21,7 +21,9 @@ Stock-Analyzer/
 │   │   └── logs/               # Application runtime logs
 │   ├── app/
 │   │   ├── __init__.py
-│   │   └── main.py             # FastAPI REST endpoints & modern lifespan handler
+│   │   ├── main.py             # Application lifecycle, middleware, and composition root
+│   │   └── routers/
+│   │       └── trading.py      # Trading, account, order, and scanner endpoints
 │   ├── agents/
 │   │   ├── __init__.py
 │   │   └── stock_agent.py      # LangGraph multi-agent orchestration (Analyst + Reviewer)
@@ -31,13 +33,11 @@ Stock-Analyzer/
 │   ├── ingestion/
 │   │   ├── __init__.py
 │   │   └── tool.py             # Resilient data tools (Finnhub, AlphaVantage, Yahoo Finance)
-│   ├── pattern_detection/
-│   │   ├── __init__.py
-│   │   └── pattern_detector.py # YOLOv8 computer vision pattern detection on charts
 │   └── trading/
 │       ├── __init__.py
+│       ├── technical_scanner.py # Local OHLCV rule-based market scanner
 │       ├── broker.py           # Alpaca Markets SDK integration with safety limits
-│       └── signal_engine.py    # Pattern weighting & trading signal calculator
+│       └── alpaca_oauth.py     # Per-user paper-account OAuth and token refresh
 ├── frontend/
 │   ├── .env                    # Frontend environment configuration (VITE_API_URL)
 │   ├── .env.example            # Frontend environment template
@@ -45,6 +45,9 @@ Stock-Analyzer/
 │   ├── vite.config.js          # Vite configuration
 │   └── src/
 │       ├── App.jsx             # Main dashboard (Chat & Trading views)
+│       ├── hooks/               # Reusable auth/theme/scanner state
+│       ├── lib/                 # Shared API client and frontend infrastructure
+│       ├── pages/               # Route/view-level composition components
 │       ├── components/
 │       │   ├── Sidebar.jsx     # Conversation history & thread management
 │       │   ├── StockCard.jsx   # Live stock quote & interactive intraday chart
@@ -97,9 +100,12 @@ Stock-Analyzer/
 
 ## 🛡️ Key System Guarantees & Refactoring Highlights
 
-1. **Clean Separation of Filesystem Concerns**:
+1. **Local, Explainable Market Scanning**:
+   - The scanner uses OHLCV data from Yahoo Finance and deterministic SMA, RSI, MACD, volume, and breakout rules.
+   - It does not require YOLO, a downloaded model, a GPU, or a Hugging Face account.
+2. **Clean Separation of Filesystem Concerns**:
    - Source code, configurations, logs, and temporary chart visualizations are strictly separated.
-   - Temporary candlestick PNGs generated during YOLOv8 inference are automatically cleaned up from `backend/data/temp/` to prevent disk accumulation.
+   - Runtime temporary files are kept under `backend/data/temp/` to prevent disk accumulation.
 2. **Centralized Configuration**:
    - Single source of truth in [`backend/core/config.py`](file:///c:/Users/VISHAL%20BHAGAT/Desktop/Stock-Analyzer/backend/core/config.py) for all paths, API keys, and safety bounds.
 3. **Resilient Data Ingestion**:
@@ -109,3 +115,12 @@ Stock-Analyzer/
 5. **Zero Dead Code & Full Type Safety**:
    - All unreachable code paths, phantom dependencies, and ESLint issues have been resolved.
    - Both backend compilation and frontend production builds pass with 0 errors.
+
+## 🧩 Module Boundaries
+
+- **Frontend pages** compose views such as authentication, terms, and trading.
+- **Frontend hooks** own reusable stateful behavior such as theme persistence and technical scans.
+- **Frontend components** focus on presentation and user interaction.
+- **Backend routers** expose HTTP endpoints and delegate to services/tools.
+- **Backend trading services** contain scanner, broker, and signal logic independently of FastAPI.
+- **Paper orders** are routed through the authenticated user's encrypted Alpaca OAuth connection; the agent cannot trade without that connection.

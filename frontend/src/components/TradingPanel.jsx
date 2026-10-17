@@ -22,6 +22,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { disconnectAlpaca, getAlpacaConnectUrl, getAlpacaStatus, getAuthHeaders } from '../authApi';
+import { useTradingScan } from '../hooks/useTradingScan';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -32,15 +33,13 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]);
   const [scanSymbol, setScanSymbol] = useState(initialSymbol);
-  const [scanResult, setScanResult] = useState(null);
-  const [scanning, setScanning] = useState(false);
-  const [scanStep, setScanStep] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('scanner');
   const [lastRefreshed, setLastRefreshed] = useState(null);
   const [alpacaStatus, setAlpacaStatus] = useState(null);
   const [connectingAlpaca, setConnectingAlpaca] = useState(false);
+  const { scanResult, scanning, scanStep, error: scanError, scanSymbol: runScanForSymbol } = useTradingScan();
 
   // Auto-scan when navigated here with an initialSymbol
   useEffect(() => {
@@ -48,7 +47,7 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
       setScanSymbol(initialSymbol);
       runScanForSymbol(initialSymbol);
     }
-  }, [initialSymbol]);
+  }, [initialSymbol, runScanForSymbol]);
 
   useEffect(() => {
     fetchTradingData();
@@ -91,7 +90,7 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
     setConnectingAlpaca(true);
     try {
       window.location.assign(await getAlpacaConnectUrl());
-    } catch (e) {
+    } catch {
       setError('Unable to start Alpaca connection. Check the backend configuration.');
       setConnectingAlpaca(false);
     }
@@ -104,43 +103,18 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
       setAccount(null);
       setPositions([]);
       setOrders([]);
-    } catch (e) {
+    } catch {
       setError('Unable to disconnect the Alpaca account.');
-    }
-  }
-
-  async function runScanForSymbol(symbol) {
-    const cleanSym = symbol.trim().toUpperCase();
-    if (!cleanSym) return;
-
-    setScanning(true);
-    setScanStep(1);
-    setScanResult(null);
-    setError(null);
-
-    // Multi-phase scanner simulation timer for rich UX
-    const stepTimer1 = setTimeout(() => setScanStep(2), 500);
-    const stepTimer2 = setTimeout(() => setScanStep(3), 1100);
-
-    try {
-      const res = await fetch(`${API}/trading/scan/${cleanSym}`, { method: 'POST' });
-      if (!res.ok) throw new Error(`Scan failed: ${res.statusText}`);
-      const data = await res.json();
-      setScanResult(data);
-    } catch (e) {
-      console.error('[TradingPanel] Scan failed:', e);
-      setError(`Scan failed for ${cleanSym}: ${e.message}`);
-    } finally {
-      clearTimeout(stepTimer1);
-      clearTimeout(stepTimer2);
-      setScanning(false);
-      setScanStep(0);
     }
   }
 
   function handleScan() {
     runScanForSymbol(scanSymbol);
   }
+
+  useEffect(() => {
+    if (scanError) setError(scanError);
+  }, [scanError]);
 
   const fmt = (val) => val?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00';
 
@@ -187,7 +161,7 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
                 </span>
               </div>
               <p className="text-xs font-medium text-[var(--text-secondary)] mt-0.5">
-                Institutional-grade pattern scanner & multi-broker execution fabric
+                Explainable technical scanner & multi-broker execution fabric
               </p>
             </div>
           </div>
@@ -318,7 +292,7 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
                       className="flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--color-quant-orange)] to-orange-600 hover:to-orange-500 text-white px-7 py-3.5 rounded-2xl text-xs font-bold tracking-wider disabled:opacity-40 transition-all shadow-md shadow-orange-500/20 active:scale-[0.98] cursor-pointer"
                     >
                       {scanning ? <Loader2 size={16} className="animate-spin" /> : <Target size={16} />}
-                      <span>{scanning ? 'SCANNING VISION...' : 'RUN AI SCAN'}</span>
+                      <span>{scanning ? 'SCANNING MARKET...' : 'RUN TECHNICAL SCAN'}</span>
                     </button>
                   </div>
 
@@ -349,12 +323,12 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
                       <Cpu size={32} className="animate-pulse" />
                     </div>
                     <h3 className="text-base font-bold text-[var(--text-primary)] mb-2">
-                      Executing YOLOv8 Vision Scanner on ${scanSymbol.toUpperCase()}
+                      Running local technical scanner on ${scanSymbol.toUpperCase()}
                     </h3>
                     <div className="space-y-2 max-w-sm w-full mt-4 text-left">
                       <ProgressStep step={1} currentStep={scanStep} text="Fetching level-1 OHLCV candlestick timeframes..." />
                       <ProgressStep step={2} currentStep={scanStep} text="Computing technical indicators (RSI, MACD, Volume Profile)..." />
-                      <ProgressStep step={3} currentStep={scanStep} text="Running YOLOv8 neural vision model on chart geometry..." />
+                      <ProgressStep step={3} currentStep={scanStep} text="Scoring trend, momentum, volume, and breakout rules..." />
                     </div>
                   </div>
                 )}
@@ -370,7 +344,7 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
                           <div>
                             <div className="flex items-center gap-2 mb-1">
                               <span className="text-[10px] font-black uppercase tracking-wider text-[var(--text-tertiary)]">
-                                Vision Scanner Verdict / ${scanResult.symbol}
+                                Technical Scanner Verdict / ${scanResult.symbol}
                               </span>
                             </div>
                             <h2 className="text-xl font-black text-[var(--text-primary)] flex items-center gap-2">
@@ -384,7 +358,7 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
                           <div className={`flex items-center gap-2.5 px-4 py-2 rounded-xl border text-xs font-black tracking-wider ${badge.bg}`}>
                             <div className={`w-2.5 h-2.5 rounded-full ${badge.dot}`} />
                             <span>{badge.label}</span>
-                            <span className="font-mono opacity-80">({scanResult.signal_confidence || 85}%)</span>
+                            <span className="font-mono opacity-80">({scanResult.signal_confidence ?? 0}%)</span>
                           </div>
                         </div>
                       );
@@ -392,30 +366,21 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
 
                     {/* Formations & Logic Grid */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                      {/* Left: Chart Formations */}
+                      {/* Left: Technical Signals */}
                       <div className="bg-[var(--bg-surface-elevated)]/60 border border-[var(--border-subtle)] rounded-2xl p-5">
                         <div className="flex items-center justify-between mb-4 pb-2 border-b border-[var(--border-subtle)]">
                           <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">
                             <TrendingUp size={14} className="text-[var(--color-quant-orange)]" />
-                            Detected Chart Formations
+                            Technical Signals
                           </h4>
-                          <span className="text-[10px] font-mono text-[var(--text-tertiary)]">YOLOv8 Engine</span>
+                          <span className="text-[10px] font-mono text-[var(--text-tertiary)]">RULE ENGINE</span>
                         </div>
 
-                        {scanResult.patterns?.length > 0 ? (
+                        {scanResult.reasons?.length > 0 ? (
                           <div className="space-y-4">
-                            {scanResult.patterns.map((p, i) => (
+                            {scanResult.reasons.map((reason, i) => (
                               <div key={i} className="p-3 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-                                <div className="flex items-center justify-between text-xs font-bold mb-2">
-                                  <span className="text-[var(--text-primary)]">{p.name}</span>
-                                  <span className="text-[var(--color-quant-orange)] font-mono">{p.confidence}% Probability</span>
-                                </div>
-                                <div className="h-2 bg-[var(--bg-surface-elevated)] rounded-full overflow-hidden">
-                                  <div
-                                    className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400 transition-all duration-700"
-                                    style={{ width: `${Math.min(p.confidence, 100)}%` }}
-                                  />
-                                </div>
+                                <span className="text-xs font-bold text-[var(--text-primary)]">{reason}</span>
                               </div>
                             ))}
                           </div>
@@ -423,7 +388,7 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
                           <div className="p-8 text-center text-xs text-[var(--text-tertiary)]">
                             <Target size={28} className="mx-auto mb-2 opacity-50" />
                             <p className="font-semibold text-[var(--text-secondary)]">Consolidation Phase</p>
-                            <p className="mt-1">No definitive multi-touch breakout formation detected above 70% threshold.</p>
+                            <p className="mt-1">No technical rules were triggered for this symbol.</p>
                           </div>
                         )}
                       </div>
@@ -466,7 +431,7 @@ export default function TradingPanel({ initialSymbol = '', onAskAI }) {
                     </div>
                     <p className="text-sm font-bold text-[var(--text-primary)]">Scan Engine Ready</p>
                     <p className="text-xs text-[var(--text-secondary)] max-w-sm mt-1">
-                      Input any US stock ticker above or click a quick ticker to run the YOLOv8 neural vision detector.
+                      Input any US stock ticker above or click a quick ticker to run the local technical rule engine.
                     </p>
                   </div>
                 )}

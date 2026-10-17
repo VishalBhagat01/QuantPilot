@@ -18,14 +18,13 @@ export default function Auth() {
   const [showTerms, setShowTerms] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsContent, setTermsContent] = useState(null);
-  const [termsLoading, setTermsLoading] = useState(false);
+  const [termsLoading, setTermsLoading] = useState(true);
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
   const termsScrollRef = useRef(null);
 
   // Fetch T&C content from backend when modal opens
   useEffect(() => {
     if (showTerms && !termsContent) {
-      setTermsLoading(true);
       getTermsContent()
         .then((data) => setTermsContent(data))
         .catch(() => setTermsContent({ title: 'Terms & Conditions', sections: [{ heading: 'Error', body: 'Could not load terms. Please try again.' }] }))

@@ -502,134 +502,10 @@ def fetch_stock_dashboard_data(symbol: str, timeframe: str = "1D"):
 
 @tool
 def predict_stock_signal(symbol: str):
-    """Generate a BUY/SELL/HOLD trading signal using technical indicators (SMA, RSI, MACD)."""
-    clean_sym = symbol.strip().upper()
-    df = None
+    """Generate an explainable local BUY/SELL/HOLD technical scan."""
+    from backend.trading.technical_scanner import scan_symbol
 
-    # 1. Try AlphaVantage
-    if ALPHA_KEY:
-        try:
-            url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={clean_sym}&outputsize=compact&apikey={ALPHA_KEY}"
-            data = _safe_get(url, timeout=5.0)
-            if data and "Time Series (Daily)" in data:
-                time_series = data["Time Series (Daily)"]
-                dates = sorted(time_series.keys(), reverse=True)[:100]
-                prices = [
-                    {
-                        "date": date,
-                        "close": float(time_series[date]["4. close"]),
-                        "open": float(time_series[date]["1. open"]),
-                        "high": float(time_series[date]["2. high"]),
-                        "low": float(time_series[date]["3. low"])
-                    }
-                    for date in reversed(dates)
-                ]
-                if prices:
-                    df = pd.DataFrame(prices)
-        except Exception:
-            pass
-
-    # 2. Fallback to yfinance
-    if df is None or len(df) < 10:
-        try:
-            import yfinance as yf
-            y_df = yf.download(clean_sym, period="6mo", interval="1d", progress=False)
-            if not y_df.empty:
-                df = pd.DataFrame({
-                    "close": y_df["Close"].squeeze().astype(float),
-                    "open": y_df["Open"].squeeze().astype(float),
-                    "high": y_df["High"].squeeze().astype(float),
-                    "low": y_df["Low"].squeeze().astype(float)
-                }).dropna().reset_index(drop=True)
-        except Exception:
-            pass
-
-    if df is None or len(df) < 5:
-        return {
-            "symbol": clean_sym,
-            "signal": "HOLD",
-            "confidence": "50%",
-            "confidence_raw": 50,
-            "reasoning": f"Insufficient historical data available for {clean_sym}.",
-            "indicators": {}
-        }
-
-    sma_20 = float(df["close"].iloc[-20:].mean()) if len(df) >= 20 else float(df["close"].mean())
-    sma_50 = float(df["close"].iloc[-50:].mean()) if len(df) >= 50 else float(df["close"].mean())
-
-    closes = df["close"].values
-    deltas = pd.Series(closes).diff()
-    gains = (deltas.where(deltas > 0, 0)).rolling(window=14).mean()
-    losses = (-deltas.where(deltas < 0, 0)).rolling(window=14).mean()
-    rs = gains / losses.replace(0, 0.0001)
-    rsi = 100 - (100 / (1 + rs))
-    current_rsi = float(rsi.iloc[-1]) if len(rsi) > 0 and not pd.isna(rsi.iloc[-1]) else 50.0
-
-    ema_12 = df["close"].ewm(span=12, adjust=False).mean()
-    ema_26 = df["close"].ewm(span=26, adjust=False).mean()
-    macd_line = ema_12 - ema_26
-    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
-    macd_diff = macd_line - macd_signal
-    current_macd = float(macd_diff.iloc[-1]) if len(macd_diff) > 0 and not pd.isna(macd_diff.iloc[-1]) else 0.0
-
-    current_price = float(closes[-1])
-    price_change = float(((current_price - closes[0]) / closes[0]) * 100)
-
-    signal_score = 0
-    reasons = []
-
-    if current_price > sma_20 > sma_50:
-        signal_score += 2
-        reasons.append("Price above SMA20 above SMA50 (bullish)")
-    elif current_price < sma_20 < sma_50:
-        signal_score -= 2
-        reasons.append("Price below SMA20 below SMA50 (bearish)")
-    elif current_price > sma_20:
-        signal_score += 1
-        reasons.append("Price above SMA20")
-    elif current_price < sma_20:
-        signal_score -= 1
-        reasons.append("Price below SMA20")
-
-    if current_rsi < 30:
-        signal_score += 1
-        reasons.append(f"RSI oversold ({current_rsi:.1f})")
-    elif current_rsi > 70:
-        signal_score -= 1
-        reasons.append(f"RSI overbought ({current_rsi:.1f})")
-
-    if current_macd > 0:
-        signal_score += 1
-        reasons.append("MACD above signal line (bullish)")
-    else:
-        signal_score -= 1
-        reasons.append("MACD below signal line (bearish)")
-
-    if signal_score >= 2:
-        signal = "BUY"
-        confidence = min(90, 50 + abs(signal_score) * 10)
-    elif signal_score <= -2:
-        signal = "SELL"
-        confidence = min(90, 50 + abs(signal_score) * 10)
-    else:
-        signal = "HOLD"
-        confidence = 50
-
-    return {
-        "symbol": clean_sym,
-        "signal": signal,
-        "confidence": f"{confidence:.0f}%",
-        "confidence_raw": confidence,
-        "reasoning": " | ".join(reasons) if reasons else "Mixed signals, recommend holding.",
-        "indicators": {
-            "SMA_20": f"${sma_20:.2f}",
-            "SMA_50": f"${sma_50:.2f}",
-            "RSI_14": f"{current_rsi:.1f}",
-            "MACD_diff": f"{current_macd:.4f}",
-            "current_price": f"${current_price:.2f}",
-            "price_change_3m": f"{price_change:.2f}%"
-        }
-    }
+    return scan_symbol(symbol).as_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -638,35 +514,23 @@ def predict_stock_signal(symbol: str):
 
 @tool
 def get_broker_account():
-    """Get broker account information.
-
-    Broker access is intentionally exposed through authenticated REST
-    endpoints so the request's Supabase user can select the correct
-    per-user Alpaca connection.
-    """
-    return {"error": "Use the authenticated /trading/account endpoint."}
+    """Get the authenticated user's paper broker account."""
+    return {"error": "Authenticated broker context is required."}
 
 
 @tool
 def get_broker_positions():
-    """Get all current open positions from the authenticated broker account."""
-    return {"error": "Use the authenticated /trading/positions endpoint."}
+    """Get the authenticated user's current paper positions."""
+    return {"error": "Authenticated broker context is required."}
 
 
 @tool
 def place_trade(symbol: str, qty: int, side: str, order_type: str = "market"):
-    """Place a trade order.
-
-    Order mutations require an authenticated user-scoped execution endpoint;
-    the AI tool cannot safely infer which connected account should be used.
-    """
-    return {"error": "Order placement requires an authenticated user-scoped endpoint."}
-    from backend.trading.broker import place_order
-    return place_order(symbol=symbol, qty=qty, side=side, order_type=order_type)
+    """Place a paper order when invoked inside an authenticated agent session."""
+    return {"error": "Authenticated broker context is required."}
 
 
 @tool
 def close_trade(symbol: str):
-    """Close an entire open position for a given stock symbol."""
-    from backend.trading.broker import close_position
-    return close_position(symbol)
+    """Close a position in an authenticated agent session."""
+    return {"error": "Authenticated broker context is required."}
