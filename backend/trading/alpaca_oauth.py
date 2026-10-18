@@ -5,22 +5,23 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
-
+from dotenv import load_dotenv
 import requests
 from cryptography.fernet import Fernet, InvalidToken
-
+import os
 from backend.core.config import settings
 from backend.db.db import db_session
 
 logger = logging.getLogger(__name__)
 
+load_dotenv()
 
 def _fernet() -> Fernet:
-    key = settings.alpaca_token_encryption_key
+    key = os.getenv("ALPACA_TOKEN_ENCRYPTION_KEY", "")
     if not key:
         raise RuntimeError("ALPACA_TOKEN_ENCRYPTION_KEY is not configured.")
     try:
-        return Fernet(key.encode())
+        return Fernet(key.encode('utf-8'))
     except (ValueError, TypeError) as exc:
         raise RuntimeError("ALPACA_TOKEN_ENCRYPTION_KEY is invalid.") from exc
 

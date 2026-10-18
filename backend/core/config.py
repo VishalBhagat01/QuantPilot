@@ -17,6 +17,22 @@ TEMP_DIR = DATA_DIR / "temp"
 CACHE_DIR = DATA_DIR / "cache"
 LOGS_DIR = DATA_DIR / "logs"
 
+
+def _cors_origins() -> List[str]:
+    """Return normalized CORS origins, including the configured frontend."""
+    configured = os.getenv("CORS_ORIGINS", "")
+    origins = configured.split(",") if configured.strip() else [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    frontend_url = os.getenv("FRONTEND_URL", "").strip()
+    if frontend_url:
+        origins.append(frontend_url)
+    return list(dict.fromkeys(origin.strip().rstrip("/") for origin in origins if origin.strip()))
+
+
 # Load backend .env with fallback to root .env
 _backend_env = BACKEND_DIR / ".env"
 _root_env = PROJECT_ROOT / ".env"
@@ -106,6 +122,11 @@ class Settings:
         default_factory=lambda: os.getenv("ALPACA_TOKEN_ENCRYPTION_KEY", "").strip()
     )
 
+    # Public frontend URL used for OAuth redirects.
+    frontend_url: str = field(
+        default_factory=lambda: os.getenv("FRONTEND_URL", "http://localhost:5173").strip().rstrip("/")
+    )
+
     # Trading Safety Limits
     max_shares_per_order: int = 100
     max_order_value_usd: int = 10_000
@@ -115,15 +136,7 @@ class Settings:
 
     # CORS Allowed Origins
     cors_origins: List[str] = field(
-        default_factory=lambda: [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:8000",
-            "http://127.0.0.1:8000",
-            "*",
-        ]
+        default_factory=_cors_origins
     )
 
 

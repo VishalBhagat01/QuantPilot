@@ -98,6 +98,60 @@ Stock-Analyzer/
 
 ---
 
+## 🚀 Deploying to Render and Vercel
+
+The repository includes [`render.yaml`](./render.yaml) for the FastAPI service and
+[`frontend/vercel.json`](./frontend/vercel.json) for Vite's client-side routing.
+Deploy the backend first so its public URL is available for the frontend.
+
+### 1. Deploy the backend on Render
+
+1. Push the repository to GitHub and create a **New > Blueprint** in Render.
+2. Select the repository. Render will detect `render.yaml` and create the
+   `quantpilot-api` web service.
+3. Add the values marked `sync: false` in Render's Environment settings. Copy
+   the variable names from [`backend/.env.example`](./backend/.env.example);
+   never upload `.env` or commit real secrets.
+4. Set `ALPACA_REDIRECT_URI` to:
+   `https://YOUR-RENDER-SERVICE.onrender.com/auth/alpaca/callback`
+5. Set `FRONTEND_URL` temporarily to your future Vercel URL and
+   `CORS_ORIGINS` to that URL. During local testing, use
+   `http://localhost:5173` instead.
+6. After the first deploy, verify:
+   `https://YOUR-RENDER-SERVICE.onrender.com/health`
+
+### 2. Deploy the frontend on Vercel
+
+1. Import the same GitHub repository into Vercel.
+2. Set **Root Directory** to `frontend`.
+3. Vercel should detect Vite. Use `npm run build` as the build command and
+   `dist` as the output directory.
+4. Add the environment variables:
+   - `VITE_API_URL=https://YOUR-RENDER-SERVICE.onrender.com`
+   - `VITE_SUPABASE_URL=your_supabase_project_url`
+   - `VITE_SUPABASE_ANON_KEY=your_supabase_anon_key`
+5. Redeploy and copy the resulting Vercel URL.
+
+### 3. Finish OAuth and CORS configuration
+
+1. In Render, set `FRONTEND_URL` to the exact Vercel origin, for example
+   `https://quantpilot.vercel.app` (no trailing slash).
+2. Set `CORS_ORIGINS` to the same origin. For a custom domain, use the custom
+   domain instead of the `vercel.app` URL.
+3. In Alpaca's OAuth application settings, add the exact Render callback URL
+   from step 1. The callback URL must use HTTPS in production.
+4. In Supabase Authentication > URL Configuration, add the Vercel URL to
+   **Site URL** and add `https://YOUR-VERCEL-DOMAIN/auth/callback` to the
+   allowed redirect URLs.
+5. Redeploy Render after changing environment variables, then test login,
+   Alpaca connect, `/health`, and one authenticated API request.
+
+Do not use `*` for production CORS when credentials are enabled. Keep the
+encryption key stable after deployment; changing it makes previously stored
+Alpaca OAuth tokens unreadable.
+
+---
+
 ## 🛡️ Key System Guarantees & Refactoring Highlights
 
 1. **Local, Explainable Market Scanning**:

@@ -20,6 +20,7 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import HTTPException, Request
 from supabase import Client, create_client
+from backend.core.config import settings
 
 load_dotenv()
 
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = settings.frontend_url
 
 def get_supabase() -> Client:
     """Create and return a Supabase client."""
