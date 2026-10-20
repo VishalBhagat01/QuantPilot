@@ -18,17 +18,28 @@ export default function TermsGate({ onAccept, onDecline }) {
   const scrollRef = useRef(null);
 
   useEffect(() => {
+    let mounted = true;
     getTermsContent()
-      .then(setTermsContent)
-      .catch(() =>
-        setTermsContent({
-          title: 'Terms & Conditions',
-          version: '1.0',
-          last_updated: 'N/A',
-          sections: [{ heading: 'Error', body: 'Could not load terms. Please try again later.' }],
-        })
-      )
-      .finally(() => setLoading(false));
+      .then((content) => {
+        if (mounted) setTermsContent(content);
+      })
+      .catch(() => {
+        if (mounted) {
+          setTermsContent({
+            title: 'Terms & Conditions',
+            version: '1.0',
+            last_updated: 'N/A',
+            sections: [{ heading: 'Error', body: 'Could not load terms. Please try again later.' }],
+          });
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleScroll = () => {

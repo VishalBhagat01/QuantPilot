@@ -139,5 +139,17 @@ def init_db():
                 );
             """)
             conn.commit()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pending_trades (
+                    user_id TEXT NOT NULL,
+                    thread_id TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    PRIMARY KEY (user_id, thread_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_pending_trades_expiry
+                    ON pending_trades (expires_at);
+            """)
+            conn.commit()
                 
             logger.info("[DB] Threads table and index ensured.")

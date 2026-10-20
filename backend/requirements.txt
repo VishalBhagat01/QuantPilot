@@ -6,6 +6,7 @@ langchain
 langchain-community
 langchain-google-genai        # Google Gemini 2.5 Flash
 langchain-groq                # Groq LLM (Llama 3.3)
+langsmith                     # LangChain/LangGraph observability
 
 # =============================================
 # LangGraph (Multi-Agent Orchestration)
@@ -31,6 +32,7 @@ pydantic
 # =============================================
 python-dotenv
 duckduckgo-search
+ddgs
 requests
 cryptography
 

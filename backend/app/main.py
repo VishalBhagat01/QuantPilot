@@ -20,7 +20,7 @@ if sys.platform == "win32":
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import psycopg
 from langgraph.checkpoint.postgres import PostgresSaver
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
@@ -33,6 +33,15 @@ from backend.ingestion.tool import fetch_stock_dashboard_data
 from backend.app.auth import verify_user
 from backend.app.auth_router import router as auth_router
 from backend.app.routers.trading import router as trading_router
+from backend.core.guardrails import (
+    DOMAIN_REJECTION_MESSAGE,
+    GuardrailViolation,
+    classify_query_domain,
+    safe_error_message,
+    validate_final_response,
+    validate_query,
+    validate_symbol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +150,8 @@ def _verify_thread_access(thread_id: str, user_id: str) -> None:
 
 
 class StockRequest(BaseModel):
-    query: str
-    thread_id: Optional[str] = None
+    query: str = Field(min_length=1, max_length=4000)
+    thread_id: Optional[str] = Field(default=None, max_length=100)
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +266,12 @@ def get_thread_history(thread_id: str, user=Depends(verify_user)):
         pass # Ignore DB errors during auth check
         
     try:
-        config = {"configurable": {"thread_id": thread_id}}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "run_name": "quantpilot-analysis",
+            "tags": ["quantpilot", "analysis", "sync"],
+            "metadata": {"request_mode": "sync"},
+        }
         state = graph.get_state(config)
         messages = state.values.get("messages", [])
         return {"messages": filter_messages(messages)}
@@ -307,31 +321,58 @@ def delete_thread(thread_id: str, user=Depends(verify_user)):
 def analyze_stock(req: StockRequest, user=Depends(verify_user)):
     """Analyze query via LangGraph multi-agent orchestration."""
     user_id = _get_user_id(user)
+    try:
+        input_check = validate_query(req.query)
+    except GuardrailViolation as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    query = input_check.query
+
+    if input_check.is_prompt_injection:
+        return {
+            "response": (
+                "I can help with market research and paper-trading workflows, "
+                "but I cannot reveal internal instructions, credentials, or bypass safety controls."
+            ),
+            "thread_id": req.thread_id,
+        }
+
+    if not _is_greeting(query) and not classify_query_domain(query).allowed:
+        return {
+            "response": DOMAIN_REJECTION_MESSAGE,
+            "thread_id": req.thread_id,
+        }
     
     if req.thread_id:
         _verify_thread_access(req.thread_id, user_id)
             
     thread_id = req.thread_id or str(uuid.uuid4())
-    logger.info(f"[BACKEND] Query: {req.query} (thread: {thread_id}, user: {user_id})")
+    logger.info("[BACKEND] Analysis request thread=%s user=%s", thread_id, user_id)
 
-    _upsert_thread(thread_id, req.query, user_id)
+    _upsert_thread(thread_id, query, user_id)
 
     # Fast-path for greetings to provide instantaneous response
-    is_greeting = _is_greeting(req.query)
+    is_greeting = _is_greeting(query)
     if is_greeting:
         welcome_text = WELCOME_MESSAGE
         return {
-            "response": welcome_text,
+            "response": validate_final_response(welcome_text, add_disclaimer=False),
             "thread_id": thread_id
         }
 
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "run_name": "quantpilot-analysis",
+        "tags": ["quantpilot", "analysis", "stream"],
+        "metadata": {"request_mode": "stream"},
+    }
 
     try:
         result = graph.invoke({
-            "messages": [HumanMessage(content=req.query)],
+            "messages": [HumanMessage(content=query)],
             "loop_count": 0,
             "user_id": user_id,
+            "thread_id": thread_id,
+            "tool_call_count": 0,
         }, config=config)
 
         filtered = filter_messages(result["messages"])
@@ -339,7 +380,7 @@ def analyze_stock(req: StockRequest, user=Depends(verify_user)):
 
         for msg in reversed(filtered):
             if msg["role"] == "assistant":
-                final_response = msg["content"]
+                final_response = validate_final_response(msg["content"])
                 break
 
         return {
@@ -349,7 +390,7 @@ def analyze_stock(req: StockRequest, user=Depends(verify_user)):
     except Exception as e:
         logger.error(f"[ERROR] Agent execution failed: {e}")
         return {
-            "response": f"I'm sorry, an error occurred during analysis: {str(e)}",
+            "response": f"I'm sorry, an error occurred during analysis: {safe_error_message(e)}",
             "thread_id": thread_id
         }
 
@@ -358,20 +399,37 @@ def analyze_stock(req: StockRequest, user=Depends(verify_user)):
 async def analyze_stock_stream(req: StockRequest, user=Depends(verify_user)):
     """Analyze query with progressive SSE streaming, speculative acknowledgment and market trivia."""
     user_id = _get_user_id(user)
+    try:
+        input_check = validate_query(req.query)
+    except GuardrailViolation as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    query = input_check.query
+
+    if input_check.is_prompt_injection:
+        async def prompt_injection_stream():
+            yield f"data: {json.dumps({'type': 'error', 'message': 'I cannot reveal internal instructions, credentials, or bypass safety controls.'})}\n\n"
+
+        return StreamingResponse(prompt_injection_stream(), media_type="text/event-stream")
+
+    if not _is_greeting(query) and not classify_query_domain(query).allowed:
+        async def domain_rejection_stream():
+            yield f"data: {json.dumps({'type': 'error', 'message': DOMAIN_REJECTION_MESSAGE})}\n\n"
+
+        return StreamingResponse(domain_rejection_stream(), media_type="text/event-stream")
 
     if req.thread_id:
         _verify_thread_access(req.thread_id, user_id)
 
     thread_id = req.thread_id or str(uuid.uuid4())
-    logger.info(f"[BACKEND STREAM] Query: {req.query} (thread: {thread_id}, user: {user_id})")
+    logger.info("[BACKEND STREAM] Analysis request thread=%s user=%s", thread_id, user_id)
 
-    _upsert_thread(thread_id, req.query, user_id)
+    _upsert_thread(thread_id, query, user_id)
 
-    is_greeting = _is_greeting(req.query)
+    is_greeting = _is_greeting(query)
 
     async def event_generator():
         # 1. Immediate speculative acknowledgment & trivia (< 50ms)
-        subject_info = detect_query_subject(req.query)
+        subject_info = detect_query_subject(query)
         sym = subject_info.get("symbol")
         name = subject_info.get("name")
         fact = subject_info.get("fact")
@@ -398,9 +456,11 @@ async def analyze_stock_stream(req: StockRequest, user=Depends(verify_user)):
                 config = {"configurable": {"thread_id": thread_id}}
                 for chunk in graph.stream(
                     {
-                        "messages": [HumanMessage(content=req.query)],
+                        "messages": [HumanMessage(content=query)],
                         "loop_count": 0,
                         "user_id": user_id,
+                        "thread_id": thread_id,
+                        "tool_call_count": 0,
                     },
                     config=config,
                     stream_mode="updates"
@@ -451,14 +511,15 @@ async def analyze_stock_stream(req: StockRequest, user=Depends(verify_user)):
                     if "DASHBOARD:" in final_assistant_message:
                         try:
                             after_dash = final_assistant_message.split("DASHBOARD:")[1].strip()
-                            t_cand = after_dash.split()[0].rstrip(".,;!").upper()
-                            if t_cand:
-                                dashboard_ticker = t_cand
+                            dashboard_ticker = validate_symbol(
+                                after_dash.split()[0].rstrip(".,;!").upper()
+                            )
                         except Exception:
                             pass
 
                     if not final_assistant_message:
                         final_assistant_message = "I have completed the analysis. Please check the dashboard metrics above."
+                    final_assistant_message = validate_final_response(final_assistant_message)
 
                     words = final_assistant_message.split(" ")
                     for i, word in enumerate(words):
@@ -470,7 +531,7 @@ async def analyze_stock_stream(req: StockRequest, user=Depends(verify_user)):
                     break
 
                 elif event_type == "error":
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'Error during analysis: {payload}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'Error during analysis: {safe_error_message(Exception(payload))}'})}\n\n"
                     break
 
             except asyncio.TimeoutError:

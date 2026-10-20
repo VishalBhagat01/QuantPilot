@@ -3,6 +3,7 @@
 import logging
 from typing import Optional, List, Dict, Any
 from backend.core.config import settings
+from backend.core.guardrails import validate_symbol
 from backend.trading.alpaca_oauth import request as user_request
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ def place_user_order(
     time_in_force: str = "day",
 ) -> Dict[str, Any]:
     """Submit a validated order through the user's connected paper account."""
-    clean_symbol = symbol.strip().upper()
+    clean_symbol = validate_symbol(symbol)
     clean_side = side.strip().lower()
     clean_type = order_type.strip().lower()
 
@@ -87,6 +88,31 @@ def place_user_order(
         raise ValueError("A positive limit price is required for limit orders.")
     if time_in_force not in {"day", "gtc", "ioc", "fok"}:
         raise ValueError("Unsupported time-in-force value.")
+
+    if not settings.alpaca_paper:
+        raise ValueError("Only paper trading is enabled by this application.")
+
+    if clean_type == "market":
+        from backend.ingestion.tool import get_stock_price
+
+        quote = get_stock_price.invoke({"symbol": clean_symbol})
+        estimated_price = float(quote.get("current", 0)) if isinstance(quote, dict) else 0
+    else:
+        estimated_price = float(limit_price or 0)
+
+    if estimated_price <= 0:
+        raise ValueError("Unable to verify a current price for this order.")
+
+    estimated_value = qty * estimated_price
+    if estimated_value > settings.max_order_value_usd:
+        raise ValueError(
+            f"Estimated order value exceeds the ${settings.max_order_value_usd:,.0f} safety limit."
+        )
+
+    if clean_side == "buy":
+        account = get_user_account_info(user_id)
+        if estimated_value > account["buying_power"]:
+            raise ValueError("Order value exceeds available buying power.")
 
     payload = {
         "symbol": clean_symbol,

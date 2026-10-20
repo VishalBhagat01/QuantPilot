@@ -4,6 +4,119 @@ QuantPilot is a modular, high-performance financial intelligence system combinin
 
 ---
 
+## 🌐 Use QuantPilot
+
+Access the hosted platform at **[quantpilotai.vercel.app](https://quantpilotai.vercel.app)**.
+
+---
+
+## What is QuantPilot?
+
+QuantPilot is an AI-assisted market research and paper-trading workspace for
+turning a broad investment question into a structured, evidence-based
+workflow. Instead of treating an LLM response as a prediction, QuantPilot
+combines an LLM analyst with live market-data tools, deterministic technical
+indicators, a review step, and an authenticated paper-trading interface.
+
+The platform can help users:
+
+- Research live prices, company fundamentals, financial statements, and news.
+- Compare market context with technical signals such as moving averages, RSI,
+  MACD, volume, and breakouts.
+- Review a concise explanation with the data points and sources used.
+- Monitor paper-account balances, positions, and buying power.
+- Prepare and submit paper orders only after an explicit user confirmation.
+- Continue conversations in thread-based sessions with optional PostgreSQL
+  persistence.
+- Inspect agent, model, and tool execution traces through optional LangSmith
+  observability.
+
+QuantPilot is designed for research and education. It does not guarantee
+returns, replace professional financial advice, or execute live brokerage
+orders.
+
+## Target Audience
+
+QuantPilot is intended for:
+
+- **Individual investors** who want a conversational way to investigate
+  companies and market trends before making their own decisions.
+- **Students and finance learners** exploring financial statements, technical
+  analysis, market-data APIs, and algorithmic trading concepts.
+- **Developers and AI engineers** who want a practical reference architecture
+  for LangGraph agents, tool calling, guardrails, streaming responses, and
+  LangSmith tracing.
+- **Quant and trading hobbyists** who want to test research ideas and
+  strategies with paper accounts rather than risking real capital.
+- **Small research teams** that need repeatable conversations, source-aware
+  analysis, and an auditable view of agent activity.
+
+It is not intended for unsupervised investment decisions, guaranteed price
+predictions, high-frequency trading, or production execution with real money.
+
+## Example Conversation
+
+The following example shows how a user can move from research to a reviewed
+paper-trading proposal. The responses are representative; market values,
+news, and signals change over time.
+
+> **User:** What is the current outlook for Microsoft (MSFT)? Please include
+> the latest price, recent news, valuation context, and technical signals.
+>
+> **QuantPilot:** I will gather the current quote, recent company news,
+> financial and valuation data, and technical indicators before forming an
+> opinion. I will separate retrieved facts from interpretation.
+>
+> **QuantPilot (research tools):** I checked the latest available quote,
+> company overview, earnings context, recent news, OHLCV history, moving
+> averages, RSI, MACD, volume, and breakout conditions.
+>
+> **QuantPilot (analyst):** MSFT is trading at **[current market value]**.
+> The retrieved data shows **[key valuation metric]**, while recent reports
+> highlight **[relevant business or market development]**. Technically, the
+> price is **[above/below]** the **[moving-average period]** average, RSI is
+> **[value or range]**, and MACD is **[positive/negative or neutral]**.
+> These indicators suggest **[bullish, bearish, or mixed]** momentum, but
+> they do not establish a guaranteed future price.
+>
+> **QuantPilot (reviewer):** The answer includes a current quote, supporting
+> data, technical context, and source information. The evidence is sufficient
+> for a research summary. A decision should also consider risk tolerance,
+> portfolio allocation, time horizon, and information not available in this
+> analysis.
+>
+> **User:** Based on that, should I buy 5 shares for my paper account?
+>
+> **QuantPilot:** I can evaluate the request and prepare a paper-trade
+> proposal, but I will not place an order yet. I first need to check the
+> technical signal and your paper account's buying power.
+>
+> **QuantPilot (account and signal checks):** The account has sufficient
+> buying power for this order. The technical signal is **[signal result]**.
+> Based on the available data, the proposal is:
+>
+> - Symbol: `MSFT`
+> - Side: `BUY`
+> - Quantity: `5`
+> - Order type: `MARKET`
+> - Account: authenticated paper account
+>
+> This is a paper-trading proposal, not investment advice. No order has been
+> submitted.
+>
+> **User:** Confirm and submit the 5-share paper order.
+>
+> **QuantPilot:** Your explicit confirmation matches the pending proposal. I
+> am submitting the order to the connected paper account within the
+> configured safety limits. I will report the broker response and order status
+> when it is available.
+
+This confirmation step is intentional: the agent can research and prepare a
+proposal, but it must not place a trade based only on an ambiguous question
+such as “Should I buy?”.
+
+---
+
 ## 🏗️ Architecture & Component Overview
 
 ```
@@ -58,7 +171,7 @@ Stock-Analyzer/
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Local Setup
 
 ### 1. Prerequisites
 - **Python 3.10+** (64-bit)
@@ -87,7 +200,33 @@ Stock-Analyzer/
    ```
    Backend will be live at `http://127.0.0.1:8000`.
 
-### 3. Frontend Setup
+### 3. Enable LangSmith observability (optional)
+
+QuantPilot uses LangChain's native LangSmith integration to trace the
+LangGraph workflow, model calls, and tool executions. Tracing is disabled by
+default and does not affect local development unless it is explicitly enabled.
+
+1. Create a project and API key in [LangSmith](https://smith.langchain.com/).
+2. Add the following values to `backend/.env` (the names must match exactly):
+
+   ```dotenv
+   LANGCHAIN_TRACING_V2=true
+   LANGCHAIN_API_KEY=your_langsmith_api_key
+   LANGCHAIN_PROJECT=quantpilot
+   LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+   ```
+
+3. Restart the backend after changing the environment file. New `/analyze`
+   and `/analyze/stream` requests will appear in the selected LangSmith
+   project with `sync` or `stream` tags.
+
+The API key stays server-side and must never be added to the frontend,
+committed to Git, or included in screenshots and logs. To disable tracing,
+set `LANGCHAIN_TRACING_V2=false` and restart the backend. LangSmith tracing
+requires network access from the backend process; if it is unavailable, the
+application's market-analysis response remains the source of truth.
+
+### 4. Frontend Setup
 1. Open a second terminal:
    ```powershell
    cd "C:\Users\VISHAL BHAGAT\Desktop\Stock-Analyzer\frontend"
@@ -95,60 +234,6 @@ Stock-Analyzer/
    npm run dev
    ```
 2. Open **http://localhost:5173** in your web browser.
-
----
-
-## 🚀 Deploying to Render and Vercel
-
-The repository includes [`render.yaml`](./render.yaml) for the FastAPI service and
-[`frontend/vercel.json`](./frontend/vercel.json) for Vite's client-side routing.
-Deploy the backend first so its public URL is available for the frontend.
-
-### 1. Deploy the backend on Render
-
-1. Push the repository to GitHub and create a **New > Blueprint** in Render.
-2. Select the repository. Render will detect `render.yaml` and create the
-   `quantpilot-api` web service.
-3. Add the values marked `sync: false` in Render's Environment settings. Copy
-   the variable names from [`backend/.env.example`](./backend/.env.example);
-   never upload `.env` or commit real secrets.
-4. Set `ALPACA_REDIRECT_URI` to:
-   `https://YOUR-RENDER-SERVICE.onrender.com/auth/alpaca/callback`
-5. Set `FRONTEND_URL` temporarily to your future Vercel URL and
-   `CORS_ORIGINS` to that URL. During local testing, use
-   `http://localhost:5173` instead.
-6. After the first deploy, verify:
-   `https://YOUR-RENDER-SERVICE.onrender.com/health`
-
-### 2. Deploy the frontend on Vercel
-
-1. Import the same GitHub repository into Vercel.
-2. Set **Root Directory** to `frontend`.
-3. Vercel should detect Vite. Use `npm run build` as the build command and
-   `dist` as the output directory.
-4. Add the environment variables:
-   - `VITE_API_URL=https://YOUR-RENDER-SERVICE.onrender.com`
-   - `VITE_SUPABASE_URL=your_supabase_project_url`
-   - `VITE_SUPABASE_ANON_KEY=your_supabase_anon_key`
-5. Redeploy and copy the resulting Vercel URL.
-
-### 3. Finish OAuth and CORS configuration
-
-1. In Render, set `FRONTEND_URL` to the exact Vercel origin, for example
-   `https://quantpilot.vercel.app` (no trailing slash).
-2. Set `CORS_ORIGINS` to the same origin. For a custom domain, use the custom
-   domain instead of the `vercel.app` URL.
-3. In Alpaca's OAuth application settings, add the exact Render callback URL
-   from step 1. The callback URL must use HTTPS in production.
-4. In Supabase Authentication > URL Configuration, add the Vercel URL to
-   **Site URL** and add `https://YOUR-VERCEL-DOMAIN/auth/callback` to the
-   allowed redirect URLs.
-5. Redeploy Render after changing environment variables, then test login,
-   Alpaca connect, `/health`, and one authenticated API request.
-
-Do not use `*` for production CORS when credentials are enabled. Keep the
-encryption key stable after deployment; changing it makes previously stored
-Alpaca OAuth tokens unreadable.
 
 ---
 
@@ -166,7 +251,9 @@ Alpaca OAuth tokens unreadable.
    - AlphaVantage quota exhaustion and Finnhub 401/429 limits gracefully fail over to Yahoo Finance (`yfinance`) with strict network timeouts.
 4. **Concurrent Tool Execution**:
    - LangGraph tool execution uses `ThreadPoolExecutor` to run multi-tool queries in parallel, cutting analysis latency by over 60%.
-5. **Zero Dead Code & Full Type Safety**:
+5. **Traceable Agent Runs**:
+   - Optional LangSmith tracing captures the LangGraph run hierarchy, LLM calls, tool calls, and request mode for debugging and latency analysis.
+6. **Zero Dead Code & Full Type Safety**:
    - All unreachable code paths, phantom dependencies, and ESLint issues have been resolved.
    - Both backend compilation and frontend production builds pass with 0 errors.
 
@@ -178,3 +265,4 @@ Alpaca OAuth tokens unreadable.
 - **Backend routers** expose HTTP endpoints and delegate to services/tools.
 - **Backend trading services** contain scanner, broker, and signal logic independently of FastAPI.
 - **Paper orders** are routed through the authenticated user's encrypted Alpaca OAuth connection; the agent cannot trade without that connection.
+- **Observability** is configured server-side through LangSmith environment variables; frontend clients never receive LangSmith credentials.

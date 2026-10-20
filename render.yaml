@@ -18,6 +18,14 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: LANGCHAIN_TRACING_V2
+        value: "false"
+      - key: LANGCHAIN_API_KEY
+        sync: false
+      - key: LANGCHAIN_PROJECT
+        value: quantpilot
+      - key: LANGCHAIN_ENDPOINT
+        value: https://api.smith.langchain.com
       - key: FINNHUB_API_KEY
         sync: false
       - key: ALPHAADVANTAGE_API_KEY

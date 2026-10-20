@@ -16,6 +16,8 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "quantpilot_access_token";
 const REFRESH_KEY = "quantpilot_refresh_token";
 const USER_KEY = "quantpilot_user";
+const TERMS_REQUEST_TIMEOUT_MS = 10000;
+let termsContentPromise = null;
 
 // ---------------------------------------------------------------------------
 // Token Persistence
@@ -248,8 +250,18 @@ export async function acceptTerms() {
 
 /** Fetch the T&C content from backend */
 export async function getTermsContent() {
-  const res = await axios.get(`${API_BASE}/auth/terms/content`);
-  return res.data;
+  if (!termsContentPromise) {
+    termsContentPromise = axios
+      .get(`${API_BASE}/auth/terms/content`, {
+        timeout: TERMS_REQUEST_TIMEOUT_MS,
+      })
+      .then((res) => res.data)
+      .catch((error) => {
+        termsContentPromise = null;
+        throw error;
+      });
+  }
+  return termsContentPromise;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +272,10 @@ export async function initializeAuth() {
   // 1. Check for existing Supabase session (handles OAuth callback automatically)
   const { user } = await getExistingSession();
   if (!user) return { user: null, termsAccepted: false };
+
+  // Start loading the public terms document while the token is validated.
+  // TermsGate reuses this promise instead of issuing a second sequential request.
+  void getTermsContent().catch(() => {});
 
   // 2. Validate the token server-side
   const validatedUser = await validateSession();

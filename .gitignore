@@ -36,6 +36,7 @@ dist/
 frontend/dist/
 dist-ssr/
 *.local
+backend/tests
 
 # IDE & Operating System Files
 .vscode/
