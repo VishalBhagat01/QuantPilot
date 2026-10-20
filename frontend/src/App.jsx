@@ -40,6 +40,7 @@ import Logo from "./components/Logo"
 import TradingPage from "./pages/TradingPage"
 import AuthPage from "./pages/AuthPage"
 import TermsPage from "./pages/TermsPage"
+import ConfirmLogoutModal from "./components/ConfirmLogoutModal"
 import { useTheme } from "./hooks/useTheme"
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
@@ -62,6 +63,8 @@ export default function App() {
   const [activeView, setActiveView] = useState('chat')
   const [selectedTradeSymbol, setSelectedTradeSymbol] = useState('')
   const [copiedIdx, setCopiedIdx] = useState(null)
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
   const { isDarkMode, toggleTheme } = useTheme()
   
   const chatEndRef = useRef(null)
@@ -438,9 +441,15 @@ export default function App() {
   }
 
   const handleSignOut = async () => {
-    await signOut()
-    setUser(null)
-    setTermsAccepted(false)
+    setIsSigningOut(true)
+    try {
+      await signOut()
+      setUser(null)
+      setTermsAccepted(false)
+      setIsLogoutModalOpen(false)
+    } finally {
+      setIsSigningOut(false)
+    }
   }
 
   const handleTermsAccepted = async () => {
@@ -482,6 +491,13 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden relative bg-[var(--bg-base)] text-[var(--text-primary)]">
+      <ConfirmLogoutModal
+        key={isLogoutModalOpen ? "logout-open" : "logout-closed"}
+        isOpen={isLogoutModalOpen}
+        onCancel={() => setIsLogoutModalOpen(false)}
+        onConfirm={handleSignOut}
+        isSubmitting={isSigningOut}
+      />
       {/* ── Sidebar ── */}
       <Sidebar
         user={user}
@@ -571,7 +587,7 @@ export default function App() {
             </button>
             <button
               className="px-4 py-1.5 h-9 rounded-full bg-[var(--color-quant-orange)] text-white hover:bg-orange-600 border-2 border-[var(--border-subtle)] shadow-[var(--shadow-sm)] transition-colors hidden sm:flex cursor-pointer items-center ml-2"
-              onClick={handleSignOut}
+              onClick={() => setIsLogoutModalOpen(true)}
               title="Sign Out"
               aria-label="Sign Out"
             >
